@@ -1,0 +1,369 @@
+name: Collect video.qq + douyin data
+on:
+  workflow_dispatch:
+    inputs:
+      VID:
+        description: 视频 vid
+        required: true
+        default: 'l4101w6a4vt'
+      CID:
+        description: 频道 cid
+        required: true
+        default: 'mzc002001w361jz'
+      DRY_RUN:
+        description: 是否跳过 commit/push（只采集、不入库）
+        type: choice
+        required: true
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
+      FORCE:
+        description: 强制执行 douyin（绕过时间窗）
+        type: choice
+        required: true
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
+      DOUYIN_INTERVAL_HOURS:
+        description: 抖音采集间隔（小时）。设为 0 表示始终 due，每次都跑
+        required: true
+        default: '4'
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-slim
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if douyin collection is due
+        id: douyin_check
+        env:
+          DOUYIN_INTERVAL_HOURS: ${{ github.event.inputs.DOUYIN_INTERVAL_HOURS }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, time
+
+          PATH = "douyin.json"
+          TOLERANCE_SEC = 5 * 60  # 5 min 容差, 让 N 小时周期 + drift 仍能按时触发
+
+          raw_hours = os.environ.get("DOUYIN_INTERVAL_HOURS", "4")
+          try:
+              INTERVAL_HOURS = int(raw_hours)
+          except ValueError:
+              print(f"WARN: DOUYIN_INTERVAL_HOURS={raw_hours!r} is not an int; treating as 0 (always due)",
+                    file=sys.stderr)
+              INTERVAL_HOURS = 0
+
+          now = int(time.time())
+
+          if INTERVAL_HOURS == 0:
+              # 0 = always due, skip file/ts check entirely.
+              due = True
+              reason = "DOUYIN_INTERVAL_HOURS=0 → always due"
+          else:
+              THRESHOLD_SEC = INTERVAL_HOURS * 3600 - TOLERANCE_SEC
+
+              if not os.path.exists(PATH):
+                  due = True
+                  reason = "douyin.json does not exist"
+              else:
+                  data = None
+                  try:
+                      with open(PATH, "r", encoding="utf-8") as f:
+                          data = json.load(f)
+                  except (json.JSONDecodeError, OSError) as e:
+                      print(f"WARN: cannot read douyin.json ({e}); forcing douyin run to recover",
+                            file=sys.stderr)
+                      due = True
+                      reason = f"douyin.json unreadable: {e}"
+
+                  if data is not None:
+                      if not isinstance(data, list) or not data:
+                          due = True
+                          reason = "douyin.json is empty or not a list"
+                      else:
+                          latest_ts = max(
+                              (r.get("ts", 0) for r in data if isinstance(r, dict)),
+                              default=0,
+                          )
+                          age = now - latest_ts
+                          due = age >= THRESHOLD_SEC
+                          reason = (
+                              f"latest ts age = {age}s ({age/3600:.2f}h), "
+                              f"threshold = {INTERVAL_HOURS}h "
+                              f"({THRESHOLD_SEC}s, 留 5min 容差)"
+                          )
+
+          due_str = "true" if due else "false"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"due={due_str}\n")
+              fh.write(f"reason={reason}\n")
+
+          print(f"douyin due: {due_str} ({reason})")
+          PY
+
+      - name: Build request body
+        id: build_body
+        run: |
+          VID="${{ github.event.inputs.VID }}" CID="${{ github.event.inputs.CID }}" python3 -c '
+          import json, os
+          body = {
+              "page_params": {
+                  "ad_wechat_authorization_status": "0",
+                  "req_from": "web_vsite",
+                  "ad_exp_ids": "",
+                  "pc_sdk_version": "",
+                  "pc_oaid": "",
+                  "new_mark_label_enabled": "1",
+                  "pc_device_info": "",
+                  "support_pc_yyyb_mobile_app_engine": "0",
+                  "pc_wegame_version": "",
+                  "cid": os.environ["CID"],
+                  "history_vid": "",
+                  "vid": os.environ["VID"],
+                  "is_pc_new_detail_page": "0",
+                  "is_from_web_flyflow": "1",
+                  "lid": ""
+              },
+              "page_bypass_params": {
+                  "params": {"caller_id": "3000010", "platform_id": "2"},
+                  "scene": "desk_detail",
+                  "app_version": "",
+                  "abtest_bypass_id": "74145a20676415e3"
+              },
+              "page_context": {}
+          }
+          print(json.dumps(body))
+          ' > body.final.json
+
+      - name: Call target API
+        id: fetch_api
+        run: |
+          HTTP_CODE=$(curl -sS -o body.resp.json -w "%{http_code}" -X POST \
+            "https://pbaccess.video.qq.com/trpc.vector_layout.page_view.PageService/getPage?vdevice_guid=74145a20676415e3&video_appid=3000010&vversion_name=8.5.96&vversion_platform=2" \
+            -H "Content-Type: application/json" \
+            -H "Referer: https://v.qq.com/" \
+            -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            --data-binary @body.final.json)
+          echo "HTTP status: $HTTP_CODE"
+          if [[ "$HTTP_CODE" != 2* ]]; then
+            echo "Request failed, response body:"
+            cat body.resp.json
+            exit 1
+          fi
+
+      - name: Parse attent_num from response (Python)
+        id: parse_val
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, time
+
+          with open("body.resp.json", "r", encoding="utf-8") as f:
+              resp = json.load(f)
+
+          cards = (((resp.get("data") or {}).get("CardList")) or [])
+          match = None
+          for card in cards:
+              if card.get("type") == "pc_detail_attent_banner":
+                  match = card
+                  break
+
+          if match is None:
+              print("ERROR: pc_detail_attent_banner not found. CardList types:", file=sys.stderr)
+              print(json.dumps([c.get("type") for c in cards], ensure_ascii=False), file=sys.stderr)
+              sys.exit(1)
+
+          try:
+              val = match["children_list"]["0"]["cards"][0]["params"]["attent_num"]
+          except (KeyError, TypeError) as e:
+              print(f"ERROR: cannot extract attent_num: {e}", file=sys.stderr)
+              print("CardList types:", json.dumps([c.get("type") for c in cards], ensure_ascii=False), file=sys.stderr)
+              sys.exit(1)
+
+          if val is None:
+              print("ERROR: attent_num is null", file=sys.stderr)
+              print("CardList types:", json.dumps([c.get("type") for c in cards], ensure_ascii=False), file=sys.stderr)
+              sys.exit(1)
+
+          ts = int(time.time())
+          record = {"ts": ts, "value": val}
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"ts={ts}\n")
+              fh.write(f"val={val}\n")
+
+          print(f"record={json.dumps(record, ensure_ascii=False)}")
+          PY
+
+      - name: Push single point to Grafana Cloud Prometheus
+        env:
+          GRAFANA_REMOTE_WRITE_URL: ${{ secrets.GRAFANA_REMOTE_WRITE_URL }}
+          GRAFANA_USER: ${{ secrets.GRAFANA_USER }}
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+          VAL: ${{ steps.parse_val.outputs.val }}
+        run: |
+          python3 -m pip install --quiet prometheus-remote-writer
+          python3 push_to_grafana.py qq-video --val "$VAL"
+
+      - name: Run Python downsample logic（核心分层归档）
+        id: process_data
+        env:
+          RECORD_TS: ${{ steps.parse_val.outputs.ts }}
+          RECORD_VAL: ${{ steps.parse_val.outputs.val }}
+        run: python3 process.py
+
+      - name: Fetch douyin user profile
+        if: ${{ github.event.inputs.FORCE == 'true' || steps.douyin_check.outputs.due == 'true' }}
+        env:
+          DOUYIN_PROFILE_URL: ${{ secrets.DOUYIN_PROFILE_URL }}
+          DOUYIN_PROFILE_COOKIE: ${{ secrets.DOUYIN_PROFILE_COOKIE }}
+        run: |
+          curl --silent --show-error --fail \
+            --url "${DOUYIN_PROFILE_URL}" \
+            -H 'accept: application/json, text/plain, */*' \
+            -H 'origin: https://www.douyin.com' \
+            -H 'referer: https://www.douyin.com/' \
+            -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36' \
+            -b "${DOUYIN_PROFILE_COOKIE}" \
+            -o user_profile.json
+
+      - name: Run fetch_douyin.py for each hashtag
+        id: fetch_dy
+        if: ${{ github.event.inputs.FORCE == 'true' || steps.douyin_check.outputs.due == 'true' }}
+        run: |
+          # Hardcoded 3-tuples to track: "HID ChineseName alias"
+          #   - HID        : douyin hashtag id (cid)
+          #   - ChineseName: 中文话题名（与页面 chaName 对比，作为校验）
+          #   - alias      : 英文/拼音别名，用作 douyin.json 中字段前缀
+          #                  （避免中文 key 带来的转义/排序/列名兼容问题）
+          # Each tuple produces one set of `<alias>_tag_view_count` /
+          # `<alias>_tag_user_count` fields in the single per-run record.
+          # Edit this list to add/remove hashtags.
+          PAIRS=(
+            "1785612028243012 昀牵孟绕 yqmr"
+            "1681434850032712 尚公主 sgz"
+            "1699801670926349 扶摇直尚 fyzs"
+          )
+
+          set -euo pipefail
+          rm -f viewcount.*.json alias.*
+          for i in "${!PAIRS[@]}"; do
+            read -r HID TAG_NAME ALIAS <<< "${PAIRS[$i]}"
+            echo ">>> [$i] HID=$HID TAG_NAME=$TAG_NAME ALIAS=$ALIAS"
+            HID="$HID" TAG_NAME="$TAG_NAME" \
+              python3 fetch_douyin.py > "viewcount.$i.json"
+            echo -n "$ALIAS" > "alias.$i"
+            echo "    fetched: $(cat viewcount.$i.json)"
+          done
+
+      - name: Append to douyin.json
+        if: ${{ github.event.inputs.FORCE == 'true' || steps.douyin_check.outputs.due == 'true' }}
+        run: |
+          python3 - <<'PY'
+          import glob, json, os, time
+          from pathlib import Path  # noqa: F401  (kept for future use)
+
+          path = "douyin.json"
+          if os.path.exists(path):
+              with open(path, "r", encoding="utf-8") as f:
+                  data = json.load(f)
+              if not isinstance(data, list):
+                  raise SystemExit(f"douyin.json exists but is not a list: {type(data).__name__}")
+          else:
+              data = []
+
+          # Parse sgz_follower_count / sgz_total_favorited from the user profile response.
+          # See douyin.md: 粉丝数 → sgz_follower_count, 获赞总数 → sgz_total_favorited.
+          with open("user_profile.json", "r", encoding="utf-8") as f:
+              profile = json.load(f)
+          user = profile.get("user") or {}
+          sgz_follower_count = user.get("follower_count")
+          sgz_total_favorited = user.get("total_favorited")
+          if sgz_follower_count is None or sgz_total_favorited is None:
+              raise SystemExit(
+                  "user_profile.json missing sgz_follower_count or sgz_total_favorited"
+              )
+
+          ts = int(time.time())
+
+          # fetch_douyin.py wrote one viewcount.<i>.json per hashtag; the bash
+          # loop also wrote alias.<i> with the English/pinyin alias. We merge
+          # all into ONE record per run (single timestamp), keyed by
+          # `<alias>_tag_view_count` / `<alias>_tag_user_count` so multiple
+          # hashtags coexist in the same record without collision.
+          viewcount_files = sorted(glob.glob("viewcount.*.json"))
+          if not viewcount_files:
+              raise SystemExit("no viewcount.*.json files found")
+
+          new_record = {
+              "ts": ts,
+              "sgz_follower_count": sgz_follower_count,
+              "sgz_total_favorited": sgz_total_favorited,
+          }
+          for vf in viewcount_files:
+              # Derive the index used by the bash loop (`viewcount.0.json` -> 0).
+              idx = Path(vf).stem.rsplit(".", 1)[-1]
+
+              # Read the alias written by the bash loop. Fall back to the
+              # Chinese tag name from the payload, then to a stable index key.
+              alias_file = f"alias.{idx}"
+              if os.path.exists(alias_file):
+                  with open(alias_file, "r", encoding="utf-8") as f:
+                      alias = f.read().strip()
+              else:
+                  alias = ""
+
+              with open(vf, "r", encoding="utf-8") as f:
+                  fetched = json.load(f)
+              tag_view_count = int(fetched["viewCount"])
+              tag_user_count = fetched.get("userCount")
+              if tag_user_count is not None:
+                  tag_user_count = int(tag_user_count)
+              tag_name = fetched.get("tagName")
+
+              if alias:
+                  prefix = alias
+              elif tag_name:
+                  prefix = tag_name
+              else:
+                  prefix = f"unknown_{idx}"
+
+              new_record[f"{prefix}_douyin_tag_view_count"] = tag_view_count
+              new_record[f"{prefix}_douyin_tag_user_count"] = tag_user_count
+
+          print(f"appended={json.dumps(new_record, ensure_ascii=False)}")
+          data.append(new_record)
+
+          with open(path, "w", encoding="utf-8") as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+          PY
+
+      - name: Push douyin user profile to Grafana Cloud Prometheus
+        if: ${{ github.event.inputs.FORCE == 'true' || steps.douyin_check.outputs.due == 'true' }}
+        env:
+          GRAFANA_REMOTE_WRITE_URL: ${{ secrets.GRAFANA_REMOTE_WRITE_URL }}
+          GRAFANA_USER: ${{ secrets.GRAFANA_USER }}
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+        run: |
+          python3 -m pip install --quiet prometheus-remote-writer
+          python3 push_to_grafana.py douyin-user --record-file douyin.json --last
+
+      - name: Commit and push updated data
+        if: github.event.inputs.DRY_RUN != 'true'
+        run: |
+          git config --global user.name "AutoCollector"
+          git config --global user.email "auto@collector.local"
+          git add data.json data-raw.json douyin.json
+          if git diff --quiet --cached; then
+            echo "No changes, skip commit"
+          else
+            git commit -m "auto update data $(date -u)"
+            git push
+          fi

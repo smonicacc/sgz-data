@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>sgz</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+#toolbar{display:flex;justify-content:flex-end;align-items:center;margin:0 0 16px;font-family:sans-serif;font-size:18px;gap:10px;}
+#toolbar select{padding:8px 12px;font-size:20px;}
+#refreshStatus{color:#888;font-size:13px;}
+#chart{width:100%;height:600px;}
+#dataTable{border-collapse:collapse;width:100%;margin-top:20px;font-family:sans-serif;}
+#dataTable th,#dataTable td{border:1px solid #ddd;padding:8px 12px;text-align:right;}
+#dataTable th{background:#f5f5f5;}
+#dataTable td:first-child,#dataTable th:first-child{text-align:right;}
+#dataTable td:nth-child(2),#dataTable th:nth-child(2){text-align:right;}
+#dataTable td:last-child,#dataTable th:last-child{text-align:left;}
+#dataTable th:nth-child(1),#dataTable td:nth-child(1){width:32%;}
+#dataTable th:nth-child(2),#dataTable td:nth-child(2){width:14%;}
+#dataTable th:nth-child(3),#dataTable td:nth-child(3){width:12%;}
+#dataTable th:nth-child(4),#dataTable td:nth-child(4){width:12%;}
+#dataTable th:nth-child(5),#dataTable td:nth-child(5){width:30%;}
+#loadMoreWrap{text-align:center;margin-top:20px;}
+#loadMoreBtn{padding:12px 32px;font-size:18px;cursor:pointer;border:1px solid #ccc;background:#fff;border-radius:4px;}
+#loadMoreBtn:hover{background:#f5f5f5;}
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <label for="rangeSelect">时间范围：</label>
+  <select id="rangeSelect">
+    <option value="3d" selected>最近3天</option>
+    <option value="7d">最近7天</option>
+    <option value="14d">最近14天</option>
+    <!-- 月份选项保留在 JS 中（parseRange/downsampleForChart/bucketize 等逻辑未删），需要时取消注释即可恢复 -->
+    <option value="month:9">9月</option>
+    <!-- <option value="month:10">10月</option> -->
+  </select>
+  <span id="refreshStatus"></span>
+</div>
+<div id="chart"></div>
+<table id="dataTable">
+  <thead><tr><th>时间</th><th>预约数(万)</th><th>增量</th><th>每分钟增量</th><th>当日累积增量</th></tr></thead>
+  <tbody></tbody>
+</table>
+<div id="loadMoreWrap">
+  <button id="loadMoreBtn">更多</button>
+</div>
+<script>
+// ---- 状态 ----
+let currentRange = '3d';
+let refreshTimer = null;
+let allData = [];
+let tableLimit = 50;
+let currentFiltered = [];
+let currentRangeObj = null;
+// 数据起始日（BJ）：早于这个 BJ 日的数据，折线图和表格都不显示
+// 设为 null 则不限制
+const DAY_CUM_START_BJ = '2026-09-09';
+
+const chartDom = document.getElementById('chart');
+const subChart = echarts.init(chartDom);
+const rangeSelect = document.getElementById('rangeSelect');
+const refreshStatus = document.getElementById('refreshStatus');
+
+// ---- 时间范围解析 ----
+function parseRange(rangeValue) {
+  const year = new Date().getFullYear();
+  if (rangeValue === '3d' || rangeValue === '7d' || rangeValue === '14d') {
+    const days = rangeValue === '3d' ? 3 : rangeValue === '7d' ? 7 : 14;
+    return {
+      min: Date.now() - days * 86400 * 1000,
+      max: Date.now(),
+    };
+  }
+  const m = rangeValue.match(/^month:(\d+)$/);
+  if (m) {
+    const month = parseInt(m[1], 10);  // 1-based, 但 Date 用 0-based
+    return {
+      min: new Date(year, month - 1, 1).getTime(),
+      max: new Date(year, month, 1).getTime(),
+    };
+  }
+  return { min: Date.now() - 3 * 86400 * 1000, max: Date.now() };
+}
+
+// ---- 格式化 ----
+const fmtSigned = (n, d = 0) =>
+  (n >= 0 ? '+' : '−') +
+  (d ? Math.abs(n).toFixed(d) : Math.round(Math.abs(n)).toLocaleString('en-US'));
+
+// ---- 图表渲染 ----
+function renderChart(filtered, range) {
+  if (!filtered.length) {
+    subChart.clear();
+    subChart.setOption({
+      title: { text: '预约数', left: 'center', subtext: '该时间范围内无数据' },
+    });
+    return;
+  }
+  const spanDays = (range.max - range.min) / 86400 / 1000;
+  const values = filtered.map(r => r.value);
+  const dataMax = Math.max(...values);
+  const dataMin = Math.min(...values);
+  // Y 轴 min：动态从筛选数据中算，下限不低于 3845000（避免回退）；向上 round 到 1000 倍数
+  const dynamicMin = Math.floor(dataMin / 1000) * 1000;
+  const yMin = Math.max(dynamicMin, 3845000);
+  const range2 = dataMax - yMin;
+  let interval;
+  if (range2 <= 10000) {
+    interval = 1000;
+  } else {
+    const raw = range2 / 10;
+    const exp = Math.floor(Math.log10(raw));
+    const mag = Math.pow(10, exp);
+    const norm = raw / mag;
+    if (norm <= 1) interval = mag;
+    else if (norm <= 2) interval = 2 * mag;
+    else if (norm <= 5) interval = 5 * mag;
+    else interval = 10 * mag;
+  }
+  const yMax = Math.ceil(dataMax / 1000) * 1000;
+
+  const opt = {
+    title: { text: '预约数', left: 'center' },
+    tooltip: { trigger: 'axis', valueFormatter: v => v.toString().replace(/\B(?=(\d{4})+(?!\d))/g, ',') },
+    xAxis: {
+      type: 'time',
+      min: spanDays > 14
+        ? Math.max(range.min, bjDayStart(filtered[0].ts) * 1000)
+        : Math.max(range.min, filtered[0].ts * 1000),
+      max: spanDays > 14
+        ? Math.min(range.max, (bjDayStart(filtered[filtered.length - 1].ts) + 86400) * 1000)
+        : Math.min(range.max, filtered[filtered.length - 1].ts * 1000),
+      minInterval: spanDays > 7 ? 86400000 : 3600000,
+      axisLabel: {
+        rotate: 30,
+        hideOverlap: true,
+        formatter: (val) => {
+          const d = new Date(val);
+          if (spanDays > 7) {
+            // >7 天：只显示日期（每天一个刻度）
+            return d.toLocaleDateString();
+          }
+          if (d.getMinutes() === 0 && d.getSeconds() === 0) return d.toLocaleString();
+          return '';
+        },
+      },
+    },
+    yAxis: {
+      type: 'value',
+      min: yMin,
+      max: yMax,
+      interval: interval,
+      axisLabel: { formatter: v => Math.floor(v / 1000) / 10 + '万' },
+    },
+    series: [{
+      name: '数值',
+      type: 'line',
+      symbolSize: 3,
+      data: downsampleForChart(filtered, range).map(item => [item.ts * 1000, item.value]),
+      smooth: true,
+    }],
+  };
+  subChart.setOption(opt, true);  // true = 不合并，完全替换
+}
+
+// 把 tsSec (UTC 秒) 对齐到北京时间的"今日 0 点"对应的 UTC 秒
+// 例: ts = 北京 2026-09-01 22:30 → 返回北京 2026-09-01 00:00 的 UTC 秒
+function bjDayStart(tsSec) {
+  const ms = tsSec * 1000 + 8 * 3600 * 1000;  // 转到北京时间的同一瞬时
+  const bjDate = new Date(ms);
+  const bjMidnightMs = Date.UTC(
+    bjDate.getUTCFullYear(),
+    bjDate.getUTCMonth(),
+    bjDate.getUTCDate(),
+  );
+  return bjMidnightMs / 1000 - 8 * 3600;  // 北京 0 点 = UTC 前一天 16:00
+}
+
+// 把 'YYYY-MM-DD' (BJ 日期) 转换为该日 BJ 0 点对应的 UTC ms；dateStr 为空返回 -Infinity
+function bjDayStartFromStrMs(dateStr) {
+  if (!dateStr) return -Infinity;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return Date.UTC(y, m - 1, d) - 8 * 3600 * 1000;  // BJ 0 点 = UTC 前一天 16:00
+}
+
+// 把 tsSec 对齐到"本小时整点"对应的 UTC 秒（用 UTC 小时分桶，不受时区影响）
+function bjHourStart(tsSec) {
+  return Math.floor(tsSec / 3600) * 3600;
+}
+
+// 按桶类型对数据分桶（key=桶起点 UTC 秒, value=桶内所有记录）
+// 取桶内 ts 最大（默认）或最小（useFirst=true）的那条作为代表；如果 alignEnd=true，再把 ts 改为下一桶起点
+function bucketize(filtered, unit, alignEnd, useFirst) {
+  const buckets = new Map();
+  const fn = unit === 'day' ? bjDayStart : bjHourStart;
+  for (const r of filtered) {
+    const key = fn(r.ts);
+    const arr = buckets.get(key) || [];
+    arr.push(r);
+    buckets.set(key, arr);
+  }
+  return [...buckets.entries()].map(([key, arr]) => {
+    const pick = useFirst
+      ? arr.reduce((b, r) => (r.ts < b.ts ? r : b), arr[0])
+      : arr.reduce((b, r) => (r.ts > b.ts ? r : b), arr[0]);
+    return {
+      ts: alignEnd ? key + (unit === 'day' ? 86400 : 3600) : pick.ts,
+      value: pick.value,
+    };
+  });
+}
+
+// 折线图降采样：
+//   >14天按天（ts 对齐到当天 BJ 0 点）
+//   7d~14d 把 0~7d 部分（含 15 分钟/1 小时数据）一律桶到 2 小时；7d 之后保持 data.json 实际粒度
+//   3d~7d 按 1 小时桶，保留桶内最接近整点的原始采集时间
+//   ≤3天 全保留
+function downsampleForChart(filtered, range) {
+  const spanDays = (range.max - range.min) / 86400 / 1000;
+  if (spanDays > 14) {
+    // 每天一个点：取当天第一条记录的 value（最接近当天 BJ 0:00 after），ts 对齐到当天 BJ 0 点（与 x 轴 tick 对齐）
+    return bucketize(filtered, 'day', false, true).map(b => ({ ts: bjDayStart(b.ts), value: b.value }));
+  }
+  if (spanDays > 7) {
+    // 7d~14d：< 7d 部分统一桶到 2 小时；≥ 7d 保留 data.json 的天粒度
+    const cut7dMs = range.max - 7 * 86400 * 1000;
+    const recent = filtered.filter(r => r.ts * 1000 >= cut7dMs);
+    const older  = filtered.filter(r => r.ts * 1000 <  cut7dMs);
+    return [...bucketizeTwoHour(recent), ...older].sort((a, b) => a.ts - b.ts);
+  }
+  if (spanDays > 3) return bucketizeHourClosest(filtered);       // 桶内最接近整点，ts 保留原始采集时间
+  return filtered;
+}
+
+// 14d 视图 0~7d 段用：按 2 小时桶（双数小时）分桶，桶内取最接近桶起点的记录，
+// 保留 closest 的原始 ts（不强制对齐到整点），便于 renderTable 的 dayCumMap 查找
+function bucketizeTwoHour(filtered) {
+  const BJ_OFFSET = 8 * 3600;
+  const buckets = new Map();
+  for (const r of filtered) {
+    const ms = r.ts * 1000 + BJ_OFFSET * 1000;
+    const bjH = Math.floor(ms / 3600000);
+    const evenH = bjH - (bjH % 2);
+    const keyUtc = evenH * 3600 - BJ_OFFSET;  // 偶数小时桶起点的 UTC 秒
+    const arr = buckets.get(keyUtc) || [];
+    arr.push(r);
+    buckets.set(keyUtc, arr);
+  }
+  return [...buckets.entries()].map(([key, arr]) => {
+    const closest = arr.reduce((best, r) => {
+      const d = Math.abs(r.ts - key);
+      const bd = Math.abs(best.ts - key);
+      if (d < bd) return r;
+      if (d === bd && r.ts < best.ts) return r;
+      return best;
+    }, arr[0]);
+    // 保留 closest 的原始 ts——不再强制对齐到桶起点
+    return { ts: closest.ts, value: closest.value };
+  });
+}
+
+// 7d 选项用：按 1 小时桶（HH:00 整点）分桶，桶内取最接近 HH:00 的那条记录，
+// 保留**原始采集时间**（不强制对齐到整点）
+function bucketizeHourClosest(filtered) {
+  const BJ_OFFSET = 8 * 3600;
+  const buckets = new Map();
+  for (const r of filtered) {
+    const ms = r.ts * 1000 + BJ_OFFSET * 1000;
+    const bjH = Math.floor(ms / 3600000);
+    const keyUtc = bjH * 3600 - BJ_OFFSET;
+    const arr = buckets.get(keyUtc) || [];
+    arr.push(r);
+    buckets.set(keyUtc, arr);
+  }
+  return [...buckets.entries()].map(([key, arr]) => {
+    const closest = arr.reduce((best, r) => {
+      const d = Math.abs(r.ts - key);
+      const bd = Math.abs(best.ts - key);
+      if (d < bd) return r;
+      if (d === bd && r.ts < best.ts) return r;
+      return best;
+    }, arr[0]);
+    // 保留 closest 的原始 ts——不再强制对齐到整点
+    return { ts: closest.ts, value: closest.value };
+  });
+}
+
+// 升序遍历 allData 计算每行的 dayCum，结果以 Map<ts, {dayCum, isDayFirst}> 返回
+// 思路：
+//   - 按 BJ 日分桶
+//   - firstOfDay[bjDay]   = 当天第一条（用于"当日基准"）
+//   - lastOfDay[bjDay]    = 当天最后一条
+//   - lastDcOfDay[bjDay]  = 当天最后一条的 dc 数值
+//   - countOfDay[bjDay]   = 当天记录条数
+//   - 当天首条（跨日首条）：
+//       - 起始日 (bjDayStr === DAY_CUM_START_BJ) → dayCum = 0
+//       - 否则根据"前一天记录数"分两种：
+//           · 前一天 ≥ 2 条 → dayCum = 前一天末条.dc + (r.value - 前一天末条.value)
+//             ——接着前一天的累积增量继续算（"跨日首条"作日内累积基准）
+//           · 前一天 ≤ 1 条 → dayCum = (r.value - 前一天末条.value)
+//             ——单条的前一天.dc 实为跨日起始日的跨日增量值，不应在跨日首条再累加一次
+//   - 普通行：dayCum = r.value - firstOfDay[当天].value（日内累积从首条算起）
+function computeDayCumAsc() {
+  const asc = [...allData].sort((a, b) => a.ts - b.ts);
+  const firstOfDay    = new Map();   // bjDayStart → record
+  const lastOfDay     = new Map();   // bjDayStart → record
+  const lastDcOfDay   = new Map();   // bjDayStart → number (末条 dc 数值)
+  const countOfDay    = new Map();   // bjDayStart → number (记录条数)
+  const result        = new Map();   // ts → { dayCum, isDayFirst }
+  for (const r of asc) {
+    const bjDay = bjDayStart(r.ts);
+    const bjDayStr = new Date((bjDay + 8 * 3600) * 1000).toISOString().slice(0, 10);
+    const isDayFirst = !firstOfDay.has(bjDay);
+    if (isDayFirst) firstOfDay.set(bjDay, r);
+
+    let dayCumNum;
+    if (DAY_CUM_START_BJ && bjDayStr < DAY_CUM_START_BJ) {
+      dayCumNum = undefined;  // 起始日之前不计算
+    } else if (isDayFirst) {
+      if (DAY_CUM_START_BJ && bjDayStr === DAY_CUM_START_BJ) {
+        dayCumNum = 0;
+      } else {
+        const prevDayLast   = lastOfDay.get(bjDay - 86400);
+        const prevDayLastDc = lastDcOfDay.get(bjDay - 86400) || 0;
+        const prevDayCount  = countOfDay.get(bjDay - 86400) || 0;
+        if (!prevDayLast) {
+          dayCumNum = 0;  // 找不到前一天末条（理论上不应发生），作 0 处理
+        } else if (prevDayCount >= 2) {
+          dayCumNum = prevDayLastDc + (r.value - prevDayLast.value);
+        } else {
+          dayCumNum = r.value - prevDayLast.value;  // 前一天只 1 条：去掉跨日起始日跨日增量值的二次累加
+        }
+      }
+    } else {
+      dayCumNum = r.value - firstOfDay.get(bjDay).value;
+    }
+
+    // 维护当天末条引用、末条 dc 与记录条数
+    lastOfDay.set(bjDay, r);
+    if (dayCumNum !== undefined) lastDcOfDay.set(bjDay, dayCumNum);
+    countOfDay.set(bjDay, (countOfDay.get(bjDay) || 0) + 1);
+
+    const dayCum = dayCumNum === undefined ? '-' : fmtSigned(dayCumNum);
+    result.set(r.ts, { dayCum, isDayFirst });
+  }
+  return result;
+}
+
+// ---- 表格渲染 ----
+function renderTable(filtered, range) {
+  const spanDays = (range.max - range.min) / 86400 / 1000;  // 单位：天
+  let rows;
+  if (spanDays > 14) rows = bucketize(filtered, 'day', false, true);   // >14 天按天分桶：取每天最早一条（与折线图一致）
+  else if (spanDays > 7) {
+    // 7d~14d：< 7d 部分统一桶到 2 小时；≥ 7d 保留 data.json 的天粒度
+    const cut7dMs = range.max - 7 * 86400 * 1000;
+    const recent = filtered.filter(r => r.ts * 1000 >= cut7dMs);
+    const older  = filtered.filter(r => r.ts * 1000 <  cut7dMs);
+    rows = [...bucketizeTwoHour(recent), ...older];
+  }
+  else if (spanDays > 3) rows = bucketizeHourClosest(filtered);  // 3d~7d 与折线图一致：每偶数小时桶内最接近整点
+  else rows = filtered;                                          // ≤3 天保留全部原始数据
+  const sorted = [...rows].sort((a, b) => b.ts - a.ts);
+  const visible = sorted.slice(0, tableLimit);
+  // 升序遍历 allData 预算每行的 dayCum / isDayFirst
+  const dayCumMap = computeDayCumAsc();
+  const tbody = document.querySelector('#dataTable tbody');
+  tbody.innerHTML = visible.map((r, i) => {
+    // 关键：用 sorted 索引（而非 visible）取 prev，保证跨"更多"边界 delta/perMin 仍相对于整个降采样序列
+    const prev = sorted[i + 1];
+    let delta = '-', perMin = '-';
+    if (prev) {
+      const d = r.value - prev.value;
+      const dt = r.ts - prev.ts;
+      delta = fmtSigned(d);
+      if (dt > 0) perMin = fmtSigned(d * 60 / dt, 1);
+    }
+    const { dayCum, isDayFirst } = dayCumMap.get(r.ts) || { dayCum: '-', isDayFirst: false };
+    // 当日累积增量列：
+    //   - 无值 → '-'
+    //   - 跨日首条且值非 +0 → 加粗 + 蓝色
+    //   - +0 → 不加粗、不变蓝
+    //   - 普通行 → 默认颜色（不加粗、不变蓝）
+    const dayCumCell = (isDayFirst && dayCum !== '-' && dayCum !== '+0')
+      ? `<b style="color:#1976d2">${dayCum}</b>`
+      : dayCum;
+    return `<tr><td>${new Date(r.ts * 1000).toLocaleString()}</td><td>${(r.value / 10000).toFixed(4)}</td><td>${delta}</td><td>${perMin}</td><td>${dayCumCell}</td></tr>`;
+  }).join('');
+  // 剩余还有数据 → 显示"更多"按钮；否则隐藏
+  const btnWrap = document.getElementById('loadMoreWrap');
+  if (btnWrap) btnWrap.style.display = sorted.length > tableLimit ? '' : 'none';
+}
+
+// ---- 应用当前范围 ----
+function applyRange() {
+  currentRangeObj = parseRange(currentRange);
+  const cutoffMs = bjDayStartFromStrMs(DAY_CUM_START_BJ);
+  currentFiltered = allData.filter(r => {
+    const tsMs = r.ts * 1000;
+    return tsMs >= Math.max(currentRangeObj.min, cutoffMs) && tsMs <= currentRangeObj.max;
+  });
+  tableLimit = 50;  // 切换 range 时重置分页
+  renderChart(currentFiltered, currentRangeObj);
+  renderTable(currentFiltered, currentRangeObj);
+}
+
+// ---- 自动刷新 ----
+function startAutoRefresh() {
+  stopAutoRefresh();
+  refreshTimer = setInterval(async () => {
+    await loadData();
+    refreshStatus.textContent = `自动刷新中…（${new Date().toLocaleTimeString()}）`;
+  }, 60000);
+  refreshStatus.textContent = `自动刷新中…（${new Date().toLocaleTimeString()}）`;
+}
+function stopAutoRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  refreshStatus.textContent = '已停止自动刷新';
+}
+
+// ---- 数据加载 ----
+async function loadData() {
+  const res = await fetch('./data.json?t=' + Date.now());
+  allData = await res.json();
+  applyRange();
+}
+
+// ---- 初始化 ----
+rangeSelect.addEventListener('change', () => {
+  currentRange = rangeSelect.value;
+  if (currentRange === '3d') {
+    startAutoRefresh();
+  } else {
+    stopAutoRefresh();
+  }
+  applyRange();
+});
+loadData().then(() => startAutoRefresh());
+
+document.getElementById('loadMoreBtn').addEventListener('click', () => {
+  tableLimit += 50;
+  renderTable(currentFiltered, currentRangeObj);
+});
+
+window.addEventListener('resize', () => subChart.resize());
+</script>
+</body>
+</html>

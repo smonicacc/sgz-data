@@ -1,0 +1,5 @@
+name: Fetch douyin user posts (example only DO NOT TRIGGER)
+
+# Manual trigger only. Prepare captured/curl_p*.sh (one per paginated
+# page, captured live from DevTools) before triggering — the workflow
+# runs them verbatim via bash and parses the JSON responses.
