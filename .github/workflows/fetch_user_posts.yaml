@@ -1,0 +1,132 @@
+name: Fetch douyin user posts (example only DO NOT TRIGGER)
+
+# Manual trigger only. Prepare captured/curl_p*.sh (one per paginated
+# page, captured live from DevTools) before triggering — the workflow
+# runs them verbatim via bash and parses the JSON responses.
+
+on:
+  workflow_dispatch:
+    inputs:
+      DRY_RUN:
+        description: 是否跳过 commit/PR（采集 + 推 Prometheus，但不写入 git）
+        type: choice
+        required: true
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
+
+# Serialize manual runs: if you click "Run workflow" while a previous
+# run is still in flight, the previous one is cancelled. Prevents two
+# parallel jobs from racing on the auto/fetch-user-posts branch.
+concurrency:
+  group: fetch-user-posts
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  fetch-user-posts:
+    runs-on: ubuntu-slim
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Switch to PR branch (create from main if absent)
+        run: |
+          set -euo pipefail
+          BRANCH=auto/fetch-user-posts
+          if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
+            git checkout "$BRANCH"
+            echo "Checked out existing $BRANCH (history.json here is the latest, includes any unmerged snapshots)"
+          else
+            git checkout -b "$BRANCH"
+            echo "Created $BRANCH from main"
+          fi
+
+      - name: Run captured cURLs (curl_p1.sh, curl_p2.sh, ...)
+        id: run_curl
+        env:
+          CAPTURED_GLOB: 'captured/curl_p*.sh'
+          RESPONSES_DIR: responses
+        run: |
+          set -euo pipefail
+          # Drop stale responses so parse only aggregates this run's output.
+          rm -rf "$RESPONSES_DIR"
+          python3 fetch_user_posts.py run
+
+      - name: Parse responses into data file
+        id: parse_resp
+        if: steps.run_curl.outcome == 'success'
+        env:
+          DY_SSL_VERIFY: '0'
+          RESPONSES_DIR: responses
+          OUTPUT_FILE: data/user_posts.json
+        # parse reads data/user_posts_history.json from the CURRENT branch
+        # (auto/fetch-user-posts), which already contains every snapshot
+        # from prior runs including any unmerged ones. It appends the
+        # new snapshots and writes back to the working tree of the same
+        # branch — so the next commit carries the full history forward.
+        run: python3 fetch_user_posts.py parse
+
+      - name: Push per-aweme snapshot to Grafana Cloud Prometheus
+        if: steps.parse_resp.outcome == 'success'
+        env:
+          GRAFANA_REMOTE_WRITE_URL: ${{ secrets.GRAFANA_REMOTE_WRITE_URL }}
+          GRAFANA_USER: ${{ secrets.GRAFANA_USER }}
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+        run: |
+          python3 -m pip install --quiet prometheus-remote-writer
+          # Push every aweme's stats at snapshot.fetched_at. The history file
+          # (which carries the full time-series) is NOT pushed here — that's
+          # a manual backfill; per-fetch we only push the latest snapshot.
+          python3 push_to_grafana.py douyin-posts --snapshot-file data/user_posts.json
+
+      - name: Commit and push, then open or update PR
+        if: steps.parse_resp.outcome == 'success' && github.event.inputs.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          set -euo pipefail
+          BRANCH=auto/fetch-user-posts
+
+          git config user.name "data-fetcher-bot"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+          # Stage ONLY the history file. parse also wrote data/user_posts.json
+          # (full snapshot — local-only, never committed to the PR).
+          git add data/user_posts_history.json
+          if git diff --cached --quiet; then
+            echo "No changes in user_posts_history.json — skipping commit"
+            exit 0
+          fi
+
+          # New commit stacks on top of the branch's previous HEAD. No
+          # --amend, no reset, no /tmp.
+          git commit -m "auto: update user posts"
+
+          # Plain push. Non-fast-forward would mean someone else touched
+          # the branch — fail loudly instead of overwriting.
+          git push origin "$BRANCH"
+
+          # Open the PR on first push; on subsequent runs the new commit
+          # is already on the existing PR's branch (option A: stacked).
+          # Only count OPEN PRs: a merged/closed PR from a previous run
+          # must not block us from opening a fresh one (gh pr view by
+          # default finds PRs in any state, which is exactly the bug
+          # that hit us after the first PR was merged and the branch
+          # deleted — [new branch] on push, yet "PR already exists").
+          open_count=$(gh pr list --head "$BRANCH" --state open --json number -q '. | length' 2>/dev/null || echo 0)
+          if [ "$open_count" -gt 0 ]; then
+            echo "Open PR already exists for $BRANCH; new commit pushed on top"
+          else
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "auto: update user posts" \
+              --body "Automated fetch of douyin user posts via captured cURL replay."
+          fi
