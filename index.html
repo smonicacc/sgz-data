@@ -5,10 +5,12 @@
 <title>sgz</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <style>
-#toolbar{display:flex;justify-content:flex-end;align-items:center;margin:0 0 16px;font-family:sans-serif;font-size:18px;gap:10px;}
+#toolbar{display:flex;justify-content:space-between;align-items:center;margin:0 0 16px;font-family:sans-serif;font-size:18px;gap:10px;}
+.toolbar-group{display:flex;align-items:center;gap:10px;}
 #toolbar select{padding:8px 12px;font-size:20px;}
 #refreshStatus{color:#888;font-size:13px;}
 #chart{width:100%;height:600px;}
+#barChart{width:100%;height:400px;margin-top:20px;display:none;}
 #dataTable{border-collapse:collapse;width:100%;margin-top:20px;font-family:sans-serif;}
 #dataTable th,#dataTable td{border:1px solid #ddd;padding:8px 12px;text-align:right;}
 #dataTable th{background:#f5f5f5;}
@@ -27,18 +29,28 @@
 </head>
 <body>
 <div id="toolbar">
-  <label for="rangeSelect">时间范围：</label>
-  <select id="rangeSelect">
-    <option value="3d" selected>最近3天</option>
-    <option value="7d">最近7天</option>
-    <option value="14d">最近14天</option>
-    <!-- 月份选项保留在 JS 中（parseRange/downsampleForChart/bucketize 等逻辑未删），需要时取消注释即可恢复 -->
-    <option value="month:9">9月</option>
-    <!-- <option value="month:10">10月</option> -->
-  </select>
-  <span id="refreshStatus"></span>
+  <div class="toolbar-group">
+    <label for="chartSelect">图表：</label>
+    <select id="chartSelect">
+      <option value="line" selected>预约数</option>
+      <option value="bar">预约增量</option>
+    </select>
+  </div>
+  <div class="toolbar-group">
+    <label for="rangeSelect">时间范围：</label>
+    <select id="rangeSelect">
+      <option value="3d" selected>最近3天</option>
+      <option value="7d">最近7天</option>
+      <option value="14d">最近14天</option>
+      <!-- 月份选项保留在 JS 中（parseRange/downsampleForChart/bucketize 等逻辑未删），需要时取消注释即可恢复 -->
+      <option value="month:9">9月</option>
+      <!-- <option value="month:10">10月</option> -->
+    </select>
+    <span id="refreshStatus"></span>
+  </div>
 </div>
 <div id="chart"></div>
+<div id="barChart"></div>
 <table id="dataTable">
   <thead><tr><th>时间</th><th>预约数(万)</th><th>增量</th><th>每分钟增量</th><th>当日累积增量</th></tr></thead>
   <tbody></tbody>
@@ -49,6 +61,7 @@
 <script>
 // ---- 状态 ----
 let currentRange = '3d';
+let currentChartType = 'line';  // 'line' = 预约数折线图；'bar' = 预约数增量柱状图
 let refreshTimer = null;
 let allData = [];
 let tableLimit = 50;
@@ -60,8 +73,21 @@ const DAY_CUM_START_BJ = '2026-09-09';
 
 const chartDom = document.getElementById('chart');
 const subChart = echarts.init(chartDom);
+const barChartDom = document.getElementById('barChart');
+const barChart = echarts.init(barChartDom);
 const rangeSelect = document.getElementById('rangeSelect');
+const chartSelect = document.getElementById('chartSelect');
 const refreshStatus = document.getElementById('refreshStatus');
+
+// 根据 currentChartType 切换两个图表容器的显隐，并 resize 当前可见的
+// 注：#barChart 在 CSS 里默认 display:none，所以"显示"必须用显式 'block' 覆盖，不能用 ''
+function toggleChartDisplay() {
+  const showLine = currentChartType === 'line';
+  document.getElementById('chart').style.display = showLine ? 'block' : 'none';
+  document.getElementById('barChart').style.display = showLine ? 'none' : 'block';
+  if (showLine) subChart.resize();
+  else barChart.resize();
+}
 
 // ---- 时间范围解析 ----
 function parseRange(rangeValue) {
@@ -90,6 +116,47 @@ const fmtSigned = (n, d = 0) =>
   (d ? Math.abs(n).toFixed(d) : Math.round(Math.abs(n)).toLocaleString('en-US'));
 
 // ---- 图表渲染 ----
+// 根据 spanDays 算 Y 轴 interval（1/2/5/10 × 10^exp），range<=smallStep 时用 smallStep
+function calcInterval(range, smallStep) {
+  if (range <= smallStep * 10) return smallStep;
+  const raw = range / 10;
+  const exp = Math.floor(Math.log10(raw));
+  const mag = Math.pow(10, exp);
+  const norm = raw / mag;
+  if (norm <= 1) return mag;
+  if (norm <= 2) return 2 * mag;
+  if (norm <= 5) return 5 * mag;
+  return 10 * mag;
+}
+
+// 折线图与柱状图共用的 X 轴配置（时间轴 + range/spanDays 决定 min/max/label）
+function buildXAxisOption(filtered, range, spanDays) {
+  return {
+    type: 'time',
+    min: spanDays > 14
+      ? Math.max(range.min, bjDayStart(filtered[0].ts) * 1000)
+      : Math.max(range.min, filtered[0].ts * 1000),
+    max: spanDays > 14
+      ? Math.min(range.max, (bjDayStart(filtered[filtered.length - 1].ts) + 86400) * 1000)
+      : Math.min(range.max, filtered[filtered.length - 1].ts * 1000),
+    minInterval: spanDays > 7 ? 86400000 : 3600000,
+    axisLabel: {
+      rotate: 30,
+      hideOverlap: true,
+      formatter: (val) => {
+        const d = new Date(val);
+        if (spanDays > 7) {
+          // >7 天：只显示日期（每天一个刻度）
+          return d.toLocaleDateString();
+        }
+        if (d.getMinutes() === 0 && d.getSeconds() === 0) return d.toLocaleString();
+        return '';
+      },
+    },
+  };
+}
+
+// 折线图：展示原始预约数
 function renderChart(filtered, range) {
   if (!filtered.length) {
     subChart.clear();
@@ -105,48 +172,13 @@ function renderChart(filtered, range) {
   // Y 轴 min：动态从筛选数据中算，下限不低于 3845000（避免回退）；向上 round 到 1000 倍数
   const dynamicMin = Math.floor(dataMin / 1000) * 1000;
   const yMin = Math.max(dynamicMin, 3845000);
-  const range2 = dataMax - yMin;
-  let interval;
-  if (range2 <= 10000) {
-    interval = 1000;
-  } else {
-    const raw = range2 / 10;
-    const exp = Math.floor(Math.log10(raw));
-    const mag = Math.pow(10, exp);
-    const norm = raw / mag;
-    if (norm <= 1) interval = mag;
-    else if (norm <= 2) interval = 2 * mag;
-    else if (norm <= 5) interval = 5 * mag;
-    else interval = 10 * mag;
-  }
   const yMax = Math.ceil(dataMax / 1000) * 1000;
+  const interval = calcInterval(yMax - yMin, 1000);
 
-  const opt = {
+  subChart.setOption({
     title: { text: '预约数', left: 'center' },
     tooltip: { trigger: 'axis', valueFormatter: v => v.toString().replace(/\B(?=(\d{4})+(?!\d))/g, ',') },
-    xAxis: {
-      type: 'time',
-      min: spanDays > 14
-        ? Math.max(range.min, bjDayStart(filtered[0].ts) * 1000)
-        : Math.max(range.min, filtered[0].ts * 1000),
-      max: spanDays > 14
-        ? Math.min(range.max, (bjDayStart(filtered[filtered.length - 1].ts) + 86400) * 1000)
-        : Math.min(range.max, filtered[filtered.length - 1].ts * 1000),
-      minInterval: spanDays > 7 ? 86400000 : 3600000,
-      axisLabel: {
-        rotate: 30,
-        hideOverlap: true,
-        formatter: (val) => {
-          const d = new Date(val);
-          if (spanDays > 7) {
-            // >7 天：只显示日期（每天一个刻度）
-            return d.toLocaleDateString();
-          }
-          if (d.getMinutes() === 0 && d.getSeconds() === 0) return d.toLocaleString();
-          return '';
-        },
-      },
-    },
+    xAxis: buildXAxisOption(filtered, range, spanDays),
     yAxis: {
       type: 'value',
       min: yMin,
@@ -161,8 +193,112 @@ function renderChart(filtered, range) {
       data: downsampleForChart(filtered, range).map(item => [item.ts * 1000, item.value]),
       smooth: true,
     }],
-  };
-  subChart.setOption(opt, true);  // true = 不合并，完全替换
+  }, true);  // true = 不合并，完全替换
+}
+
+// 把 raw data 中间隔 ≈2h 的相邻两点在中点处插入一个合成点
+// 这样后续 bucketizeHourClosest 就能在两个连续小时上都画出柱子
+// 增量为偶数 → 两半相等；奇数 → 后半多 1（其中1个小时多1）
+function expandTwoHourGaps(filtered) {
+  const out = [];
+  for (let i = 0; i < filtered.length; i++) {
+    out.push(filtered[i]);
+    const next = filtered[i + 1];
+    if (next) {
+      const gap = next.ts - filtered[i].ts;
+      // 6900~7500s ≈ 2h；命中视为 2 小时桶
+      if (gap >= 6900 && gap <= 7500) {
+        const delta = next.value - filtered[i].value;
+        // 中点值 = base + floor(delta/2)
+        // → 前半 delta = floor(delta/2)；后半 delta = ceil(delta/2)（差值 1 时后半多 1）
+        const midVal = filtered[i].value + Math.floor(delta / 2);
+        out.push({ ts: filtered[i].ts + 3600, value: midVal });
+      }
+    }
+  }
+  return out;
+}
+
+// 柱状图：展示相对前一个数据点的增量
+// 分桶策略：
+//   - ≤7 天：按整点小时桶（bucketizeHourClosest）；若 raw data 中存在 ≈2h 间距，
+//           先用 expandTwoHourGaps 在中点插入合成点，保证每个整点都有柱子
+//   - >7 天（含 14d、9月等）：统一按天桶，每天一根柱
+function renderBarChart(filtered, range) {
+  if (!filtered.length) {
+    barChart.clear();
+    barChart.setOption({
+      title: { text: '预约增量', left: 'center', subtext: '该时间范围内无数据' },
+    });
+    return;
+  }
+  const spanDays = (range.max - range.min) / 86400 / 1000;
+  // 分桶策略：
+  //   ≤7 天（含 3d/7d）→ 整点小时桶；3d 全是 15min 不会有 2h gap，
+  //                    7d 才有 2h 数据，expandTwoHourGaps 会把每个 2h gap 拆成两个 1h
+  //   >7 天（含 14d/9月）→ 统一按天桶
+  let bucketed = spanDays <= 7
+    ? bucketizeHourClosest(expandTwoHourGaps(filtered))
+    : bucketize(filtered, 'day', false, true).map(b => ({ ts: bjDayStart(b.ts), value: b.value }));
+
+  // ≤7 天：最后一个整点小时桶若还没"填满"（当前 hour 只走了 ≤30min），
+  // bucketizeHourClosest 会选最接近整点的点（如 17:00:36），导致当前 hour 内
+  // 后续的数据（17:15/17:30/17:45）被埋掉，柱状图上 17:00 那根柱就把整小时的
+  // 增量全占了。这里**追加**一根 latest raw 的柱，而不是替换 hour 桶：
+  //   - 17:00 hour 桶柱：delta = 17:00:36 相对前一小时桶的增量（497）
+  //   - 追加的 17:45 柱：delta = 17:45 - 17:00:36 = 437
+  // 两根柱并存，分别体现"已过去的整点小时增量"和"当前 hour 内的部分增量"。
+  if (spanDays <= 7 && filtered.length > 0 && bucketed.length > 0) {
+    const lastRaw = filtered[filtered.length - 1];
+    const lastBucket = bucketed[bucketed.length - 1];
+    if (lastRaw.ts > lastBucket.ts) {
+      bucketed = bucketed.concat({ ts: lastRaw.ts, value: lastRaw.value });
+    }
+  }
+
+  // 升序，每点 vs 前一点算 delta（首点无前序点 = 0）
+  const sorted = [...bucketed].sort((a, b) => a.ts - b.ts);
+  const deltas = sorted.map((r, i) => ({
+    ts: r.ts,
+    delta: i === 0 ? 0 : r.value - sorted[i - 1].value,
+  }));
+
+  // Y 轴基于增量：>=0，最小步长 10
+  const deltaValues = deltas.map(d => d.delta);
+  const dataMax = Math.max(...deltaValues, 0);
+  const yMin = 0;
+  const yMax = Math.max(Math.ceil(dataMax / 10) * 10, 10);  // 全 0 时兜底 10
+  const interval = calcInterval(yMax - yMin, 10);
+
+  barChart.setOption({
+    title: { text: '预约数增量', left: 'center' },
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: v => fmtSigned(v),
+    },
+    xAxis: buildXAxisOption(filtered, range, spanDays),
+    yAxis: {
+      type: 'value',
+      min: yMin,
+      max: yMax,
+      interval: interval,
+      // 单位随分桶策略：≤7 天按整点小时桶 → "/小时"；>7 天按天桶 → "/天"
+      name: spanDays <= 7 ? '/小时' : '/天',
+      nameLocation: 'end',
+      nameGap: 8,
+      nameTextStyle: { color: '#888', fontSize: 12 },
+      // 增量较小，不带"万"单位；直接千分位
+      axisLabel: { formatter: v => Math.round(v).toLocaleString('en-US') },
+    },
+    series: [{
+      name: '增量',
+      type: 'bar',
+      data: deltas.map(d => [d.ts * 1000, d.delta]),
+      // ≤7 天：常规蓝；>7 天：浅蓝（每天一根，密度低，颜色淡一点降低视觉重量）
+      itemStyle: { color: spanDays <= 7 ? '#5470c6' : '#8aa0c8' },
+      barWidth: '90%',
+    }],
+  }, true);
 }
 
 // 把 tsSec (UTC 秒) 对齐到北京时间的"今日 0 点"对应的 UTC 秒
@@ -403,6 +539,7 @@ function applyRange() {
   });
   tableLimit = 50;  // 切换 range 时重置分页
   renderChart(currentFiltered, currentRangeObj);
+  renderBarChart(currentFiltered, currentRangeObj);
   renderTable(currentFiltered, currentRangeObj);
 }
 
@@ -440,6 +577,10 @@ rangeSelect.addEventListener('change', () => {
   }
   applyRange();
 });
+chartSelect.addEventListener('change', () => {
+  currentChartType = chartSelect.value;
+  toggleChartDisplay();
+});
 loadData().then(() => startAutoRefresh());
 
 document.getElementById('loadMoreBtn').addEventListener('click', () => {
@@ -447,7 +588,10 @@ document.getElementById('loadMoreBtn').addEventListener('click', () => {
   renderTable(currentFiltered, currentRangeObj);
 });
 
-window.addEventListener('resize', () => subChart.resize());
+window.addEventListener('resize', () => {
+  subChart.resize();
+  barChart.resize();
+});
 </script>
 </body>
 </html>
