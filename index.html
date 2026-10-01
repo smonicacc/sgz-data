@@ -296,7 +296,7 @@ function renderBarChart(filtered, range) {
       data: deltas.map(d => [d.ts * 1000, d.delta]),
       // ≤7 天：常规蓝；>7 天：浅蓝（每天一根，密度低，颜色淡一点降低视觉重量）
       itemStyle: { color: spanDays <= 7 ? '#5470c6' : '#8aa0c8' },
-      barWidth: '90%',
+      barWidth: '80%',
     }],
   }, true);
 }
