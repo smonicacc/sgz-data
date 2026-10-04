@@ -1,6 +1,24 @@
 {
   "7679749658596453041": [
     {
+      "ts": 1791072059,
+      "digg_count": 108492,
+      "comment_count": 3394,
+      "share_count": 6205
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 108476,
+      "comment_count": 3394,
+      "share_count": 6205
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 108434,
+      "comment_count": 3394,
+      "share_count": 6205
+    },
+    {
       "ts": 1791028853,
       "digg_count": 108313,
       "comment_count": 3395,
@@ -914,6 +932,24 @@
     }
   ],
   "7679748241172491441": [
+    {
+      "ts": 1791072059,
+      "digg_count": 79937,
+      "comment_count": 2696,
+      "share_count": 2823
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 79928,
+      "comment_count": 2696,
+      "share_count": 2823
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 79903,
+      "comment_count": 2696,
+      "share_count": 2822
+    },
     {
       "ts": 1791028853,
       "digg_count": 79816,
@@ -1829,6 +1865,24 @@
   ],
   "7675574770423050953": [
     {
+      "ts": 1791072059,
+      "digg_count": 990898,
+      "comment_count": 30568,
+      "share_count": 304089
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 990883,
+      "comment_count": 30567,
+      "share_count": 304089
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 990782,
+      "comment_count": 30560,
+      "share_count": 304070
+    },
+    {
       "ts": 1791028853,
       "digg_count": 990465,
       "comment_count": 30557,
@@ -2742,6 +2796,24 @@
     }
   ],
   "7675334230276399793": [
+    {
+      "ts": 1791072059,
+      "digg_count": 744650,
+      "comment_count": 27937,
+      "share_count": 232988
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 744641,
+      "comment_count": 27937,
+      "share_count": 232988
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 744597,
+      "comment_count": 27937,
+      "share_count": 232976
+    },
     {
       "ts": 1791028853,
       "digg_count": 744441,
@@ -3657,6 +3729,24 @@
   ],
   "7667569259942066810": [
     {
+      "ts": 1791072059,
+      "digg_count": 112306,
+      "comment_count": 5643,
+      "share_count": 4538
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 112302,
+      "comment_count": 5643,
+      "share_count": 4538
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 112291,
+      "comment_count": 5643,
+      "share_count": 4538
+    },
+    {
       "ts": 1791028853,
       "digg_count": 112255,
       "comment_count": 5643,
@@ -4570,6 +4660,24 @@
     }
   ],
   "7654929218279753403": [
+    {
+      "ts": 1791072059,
+      "digg_count": 287277,
+      "comment_count": 8853,
+      "share_count": 50443
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 287275,
+      "comment_count": 8853,
+      "share_count": 50443
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 287260,
+      "comment_count": 8853,
+      "share_count": 50439
+    },
     {
       "ts": 1791028853,
       "digg_count": 287219,
@@ -5485,6 +5593,24 @@
   ],
   "7654566876714294267": [
     {
+      "ts": 1791072059,
+      "digg_count": 382674,
+      "comment_count": 10576,
+      "share_count": 51810
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 382672,
+      "comment_count": 10576,
+      "share_count": 51810
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 382655,
+      "comment_count": 10576,
+      "share_count": 51810
+    },
+    {
       "ts": 1791028853,
       "digg_count": 382609,
       "comment_count": 10576,
@@ -6398,6 +6524,24 @@
     }
   ],
   "7651626589646091897": [
+    {
+      "ts": 1791072059,
+      "digg_count": 322494,
+      "comment_count": 9395,
+      "share_count": 28446
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 322490,
+      "comment_count": 9395,
+      "share_count": 28446
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 322483,
+      "comment_count": 9395,
+      "share_count": 28446
+    },
     {
       "ts": 1791028853,
       "digg_count": 322451,
@@ -7313,6 +7457,24 @@
   ],
   "7641829249453171889": [
     {
+      "ts": 1791072059,
+      "digg_count": 110174,
+      "comment_count": 3193,
+      "share_count": 8721
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 110168,
+      "comment_count": 3193,
+      "share_count": 8721
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 110159,
+      "comment_count": 3193,
+      "share_count": 8720
+    },
+    {
       "ts": 1791028853,
       "digg_count": 110129,
       "comment_count": 3190,
@@ -8226,6 +8388,24 @@
     }
   ],
   "7641204593599409882": [
+    {
+      "ts": 1791072059,
+      "digg_count": 82732,
+      "comment_count": 3642,
+      "share_count": 8018
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 82727,
+      "comment_count": 3642,
+      "share_count": 8018
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 82709,
+      "comment_count": 3642,
+      "share_count": 8018
+    },
     {
       "ts": 1791028853,
       "digg_count": 82653,
@@ -9141,6 +9321,24 @@
   ],
   "7621751828358880622": [
     {
+      "ts": 1791072059,
+      "digg_count": 904855,
+      "comment_count": 15081,
+      "share_count": 103919
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 904853,
+      "comment_count": 15081,
+      "share_count": 103918
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 904832,
+      "comment_count": 15081,
+      "share_count": 103918
+    },
+    {
       "ts": 1791028853,
       "digg_count": 904753,
       "comment_count": 15079,
@@ -10054,6 +10252,24 @@
     }
   ],
   "7621749181367352138": [
+    {
+      "ts": 1791072059,
+      "digg_count": 273477,
+      "comment_count": 3474,
+      "share_count": 15046
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 273475,
+      "comment_count": 3474,
+      "share_count": 15046
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 273467,
+      "comment_count": 3474,
+      "share_count": 15046
+    },
     {
       "ts": 1791028853,
       "digg_count": 273448,
@@ -10969,6 +11185,24 @@
   ],
   "7613013158500399281": [
     {
+      "ts": 1791072059,
+      "digg_count": 338974,
+      "comment_count": 9158,
+      "share_count": 47699
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 338973,
+      "comment_count": 9158,
+      "share_count": 47698
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 338967,
+      "comment_count": 9158,
+      "share_count": 47698
+    },
+    {
       "ts": 1791028853,
       "digg_count": 338952,
       "comment_count": 9158,
@@ -11882,6 +12116,24 @@
     }
   ],
   "7612811644380818609": [
+    {
+      "ts": 1791072059,
+      "digg_count": 452998,
+      "comment_count": 7980,
+      "share_count": 39300
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 452992,
+      "comment_count": 7980,
+      "share_count": 39300
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 452968,
+      "comment_count": 7979,
+      "share_count": 39300
+    },
     {
       "ts": 1791028853,
       "digg_count": 452882,
@@ -12797,6 +13049,24 @@
   ],
   "7605887476826656187": [
     {
+      "ts": 1791072059,
+      "digg_count": 280067,
+      "comment_count": 7206,
+      "share_count": 16542
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 280067,
+      "comment_count": 7206,
+      "share_count": 16542
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 280060,
+      "comment_count": 7206,
+      "share_count": 16540
+    },
+    {
       "ts": 1791028853,
       "digg_count": 280042,
       "comment_count": 7206,
@@ -13711,6 +13981,24 @@
   ],
   "7605886952420314213": [
     {
+      "ts": 1791072059,
+      "digg_count": 292218,
+      "comment_count": 6406,
+      "share_count": 17230
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 292219,
+      "comment_count": 6406,
+      "share_count": 17230
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 292208,
+      "comment_count": 6406,
+      "share_count": 17230
+    },
+    {
       "ts": 1791028853,
       "digg_count": 292189,
       "comment_count": 6406,
@@ -14618,6 +14906,24 @@
     }
   ],
   "7602983790265212923": [
+    {
+      "ts": 1791072059,
+      "digg_count": 302180,
+      "comment_count": 4194,
+      "share_count": 9385
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 302181,
+      "comment_count": 4194,
+      "share_count": 9385
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 302174,
+      "comment_count": 4194,
+      "share_count": 9385
+    },
     {
       "ts": 1791028853,
       "digg_count": 302157,
@@ -15527,6 +15833,24 @@
   ],
   "7602678963845088074": [
     {
+      "ts": 1791072059,
+      "digg_count": 212201,
+      "comment_count": 6788,
+      "share_count": 10302
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 212200,
+      "comment_count": 6787,
+      "share_count": 10302
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 212196,
+      "comment_count": 6787,
+      "share_count": 10302
+    },
+    {
       "ts": 1791028853,
       "digg_count": 212183,
       "comment_count": 6787,
@@ -16434,6 +16758,24 @@
     }
   ],
   "7602668375747214153": [
+    {
+      "ts": 1791072059,
+      "digg_count": 674288,
+      "comment_count": 10392,
+      "share_count": 56100
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 674288,
+      "comment_count": 10392,
+      "share_count": 56100
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 674282,
+      "comment_count": 10392,
+      "share_count": 56100
+    },
     {
       "ts": 1791028853,
       "digg_count": 674273,
@@ -17349,6 +17691,24 @@
   ],
   "7602476572029944497": [
     {
+      "ts": 1791072059,
+      "digg_count": 144475,
+      "comment_count": 3916,
+      "share_count": 3407
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 144473,
+      "comment_count": 3916,
+      "share_count": 3407
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 144472,
+      "comment_count": 3916,
+      "share_count": 3407
+    },
+    {
       "ts": 1791028853,
       "digg_count": 144457,
       "comment_count": 3916,
@@ -18262,6 +18622,24 @@
     }
   ],
   "7602297207509284977": [
+    {
+      "ts": 1791072059,
+      "digg_count": 309620,
+      "comment_count": 4549,
+      "share_count": 17261
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 309621,
+      "comment_count": 4549,
+      "share_count": 17261
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 309616,
+      "comment_count": 4549,
+      "share_count": 17261
+    },
     {
       "ts": 1791028853,
       "digg_count": 309601,
@@ -19177,6 +19555,24 @@
   ],
   "7602296171529477115": [
     {
+      "ts": 1791072059,
+      "digg_count": 98427,
+      "comment_count": 1319,
+      "share_count": 2329
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 98427,
+      "comment_count": 1319,
+      "share_count": 2329
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 98426,
+      "comment_count": 1319,
+      "share_count": 2329
+    },
+    {
       "ts": 1791028853,
       "digg_count": 98416,
       "comment_count": 1319,
@@ -20090,6 +20486,24 @@
     }
   ],
   "7602295165789435121": [
+    {
+      "ts": 1791072059,
+      "digg_count": 499076,
+      "comment_count": 6471,
+      "share_count": 37237
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 499077,
+      "comment_count": 6471,
+      "share_count": 37237
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 499074,
+      "comment_count": 6471,
+      "share_count": 37237
+    },
     {
       "ts": 1791028853,
       "digg_count": 499060,
@@ -21005,6 +21419,24 @@
   ],
   "7602259238693385459": [
     {
+      "ts": 1791072059,
+      "digg_count": 232219,
+      "comment_count": 10662,
+      "share_count": 10409
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 232219,
+      "comment_count": 10662,
+      "share_count": 10409
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 232218,
+      "comment_count": 10662,
+      "share_count": 10409
+    },
+    {
       "ts": 1791028853,
       "digg_count": 232199,
       "comment_count": 10662,
@@ -21918,6 +22350,24 @@
     }
   ],
   "7591450498210419633": [
+    {
+      "ts": 1791072059,
+      "digg_count": 867317,
+      "comment_count": 27681,
+      "share_count": 113413
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 867318,
+      "comment_count": 27681,
+      "share_count": 113412
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 867318,
+      "comment_count": 27681,
+      "share_count": 113411
+    },
     {
       "ts": 1791028853,
       "digg_count": 867303,
@@ -22833,6 +23283,24 @@
   ],
   "7589604756797793723": [
     {
+      "ts": 1791072059,
+      "digg_count": 369307,
+      "comment_count": 6215,
+      "share_count": 23337
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 369308,
+      "comment_count": 6215,
+      "share_count": 23337
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 369306,
+      "comment_count": 6215,
+      "share_count": 23337
+    },
+    {
       "ts": 1791028853,
       "digg_count": 369295,
       "comment_count": 6215,
@@ -23746,6 +24214,24 @@
     }
   ],
   "7583677162877144346": [
+    {
+      "ts": 1791072059,
+      "digg_count": 439916,
+      "comment_count": 6360,
+      "share_count": 38123
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 439915,
+      "comment_count": 6360,
+      "share_count": 38123
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 439913,
+      "comment_count": 6360,
+      "share_count": 38119
+    },
     {
       "ts": 1791028853,
       "digg_count": 439899,
@@ -24661,6 +25147,24 @@
   ],
   "7583674141539568905": [
     {
+      "ts": 1791072059,
+      "digg_count": 240414,
+      "comment_count": 5383,
+      "share_count": 8531
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 240412,
+      "comment_count": 5383,
+      "share_count": 8531
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 240409,
+      "comment_count": 5384,
+      "share_count": 8531
+    },
+    {
       "ts": 1791028853,
       "digg_count": 240395,
       "comment_count": 5384,
@@ -25574,6 +26078,24 @@
     }
   ],
   "7566890534225890619": [
+    {
+      "ts": 1791072059,
+      "digg_count": 519542,
+      "comment_count": 22089,
+      "share_count": 59154
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 519543,
+      "comment_count": 22089,
+      "share_count": 59153
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 519538,
+      "comment_count": 22089,
+      "share_count": 59153
+    },
     {
       "ts": 1791028853,
       "digg_count": 519522,
@@ -26489,6 +27011,24 @@
   ],
   "7565799471863483706": [
     {
+      "ts": 1791072059,
+      "digg_count": 397783,
+      "comment_count": 13190,
+      "share_count": 41827
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 397784,
+      "comment_count": 13190,
+      "share_count": 41827
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 397781,
+      "comment_count": 13190,
+      "share_count": 41827
+    },
+    {
       "ts": 1791028853,
       "digg_count": 397767,
       "comment_count": 13190,
@@ -27402,6 +27942,24 @@
     }
   ],
   "7565794188832132362": [
+    {
+      "ts": 1791072059,
+      "digg_count": 553358,
+      "comment_count": 20772,
+      "share_count": 124410
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 553359,
+      "comment_count": 20773,
+      "share_count": 124409
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 553356,
+      "comment_count": 20773,
+      "share_count": 124409
+    },
     {
       "ts": 1791028853,
       "digg_count": 553342,
@@ -28317,6 +28875,24 @@
   ],
   "7557292182567439643": [
     {
+      "ts": 1791072059,
+      "digg_count": 204187,
+      "comment_count": 11626,
+      "share_count": 7948
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 204188,
+      "comment_count": 11626,
+      "share_count": 7948
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 204184,
+      "comment_count": 11626,
+      "share_count": 7948
+    },
+    {
       "ts": 1791028853,
       "digg_count": 204172,
       "comment_count": 11626,
@@ -29230,6 +29806,24 @@
     }
   ],
   "7544722080659672370": [
+    {
+      "ts": 1791072059,
+      "digg_count": 304501,
+      "comment_count": 15246,
+      "share_count": 14396
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 304501,
+      "comment_count": 15246,
+      "share_count": 14396
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 304496,
+      "comment_count": 15246,
+      "share_count": 14396
+    },
     {
       "ts": 1791028853,
       "digg_count": 304488,
@@ -30145,6 +30739,24 @@
   ],
   "7544398141043477769": [
     {
+      "ts": 1791072059,
+      "digg_count": 1834045,
+      "comment_count": 83206,
+      "share_count": 386567
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 1834047,
+      "comment_count": 83206,
+      "share_count": 386567
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 1834047,
+      "comment_count": 83206,
+      "share_count": 386567
+    },
+    {
       "ts": 1791028853,
       "digg_count": 1834038,
       "comment_count": 83205,
@@ -31058,6 +31670,24 @@
     }
   ],
   "7544609981715729714": [
+    {
+      "ts": 1791072059,
+      "digg_count": 440890,
+      "comment_count": 12722,
+      "share_count": 63266
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 440891,
+      "comment_count": 12722,
+      "share_count": 63266
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 440887,
+      "comment_count": 12722,
+      "share_count": 63266
+    },
     {
       "ts": 1791028853,
       "digg_count": 440875,
@@ -31973,6 +32603,24 @@
   ],
   "7544395348028050739": [
     {
+      "ts": 1791072059,
+      "digg_count": 251815,
+      "comment_count": 8123,
+      "share_count": 26827
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 251816,
+      "comment_count": 8123,
+      "share_count": 26827
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 251814,
+      "comment_count": 8123,
+      "share_count": 26827
+    },
+    {
       "ts": 1791028853,
       "digg_count": 251801,
       "comment_count": 8123,
@@ -32886,6 +33534,24 @@
     }
   ],
   "7544404502763326746": [
+    {
+      "ts": 1791072059,
+      "digg_count": 504810,
+      "comment_count": 22711,
+      "share_count": 124191
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 504810,
+      "comment_count": 22711,
+      "share_count": 124191
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 504802,
+      "comment_count": 22711,
+      "share_count": 124191
+    },
     {
       "ts": 1791028853,
       "digg_count": 504782,
@@ -33801,6 +34467,24 @@
   ],
   "7544410119150259494": [
     {
+      "ts": 1791072059,
+      "digg_count": 163669,
+      "comment_count": 9282,
+      "share_count": 11931
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 163668,
+      "comment_count": 9282,
+      "share_count": 11931
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 163665,
+      "comment_count": 9282,
+      "share_count": 11931
+    },
+    {
       "ts": 1791028853,
       "digg_count": 163651,
       "comment_count": 9282,
@@ -34714,6 +35398,24 @@
     }
   ],
   "7518353962039561532": [
+    {
+      "ts": 1791072059,
+      "digg_count": 820776,
+      "comment_count": 79478,
+      "share_count": 252847
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 820817,
+      "comment_count": 79478,
+      "share_count": 252848
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 820771,
+      "comment_count": 79478,
+      "share_count": 252847
+    },
     {
       "ts": 1791028853,
       "digg_count": 820801,
@@ -35629,6 +36331,24 @@
   ],
   "7688680481227415153": [
     {
+      "ts": 1791072059,
+      "digg_count": 78265,
+      "comment_count": 3831,
+      "share_count": 4692
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 78227,
+      "comment_count": 3830,
+      "share_count": 4692
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 78101,
+      "comment_count": 3829,
+      "share_count": 4686
+    },
+    {
       "ts": 1791028853,
       "digg_count": 77786,
       "comment_count": 3824,
@@ -36267,6 +36987,24 @@
   ],
   "7691621444607151858": [
     {
+      "ts": 1791072059,
+      "digg_count": 109187,
+      "comment_count": 4715,
+      "share_count": 11779
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 108934,
+      "comment_count": 4713,
+      "share_count": 11773
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 107696,
+      "comment_count": 4682,
+      "share_count": 11648
+    },
+    {
       "ts": 1791028853,
       "digg_count": 104272,
       "comment_count": 4618,
@@ -36352,6 +37090,24 @@
     }
   ],
   "7691620288476003977": [
+    {
+      "ts": 1791072059,
+      "digg_count": 65575,
+      "comment_count": 1964,
+      "share_count": 5240
+    },
+    {
+      "ts": 1791057655,
+      "digg_count": 65409,
+      "comment_count": 1963,
+      "share_count": 5237
+    },
+    {
+      "ts": 1791043252,
+      "digg_count": 64754,
+      "comment_count": 1955,
+      "share_count": 5192
+    },
     {
       "ts": 1791028853,
       "digg_count": 63125,
