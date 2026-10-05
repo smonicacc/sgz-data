@@ -103,11 +103,9 @@ hour_groups = defaultdict(list)
 for rec in mid_raw:
     hour_groups[bj_hour_start_utc(rec["ts"])].append(rec)
 for lst in hour_groups.values():
-    # 桶内每条到 HH:00 的距离 = |(ts - bucket_start)| 与 |(ts - (bucket_start+3600))| 的较小值
-    # 用最近距离选；并列时取 ts 最小的（更早采集的）
+    # 桶内取到 HH:00（桶起点）最近的那条；并列时取 ts 最小的（更早采集的）
     closest = min(lst, key=lambda r: (
-        min(abs(r["ts"] - bj_hour_start_utc(r["ts"])),
-            abs((bj_hour_start_utc(r["ts"]) + 3600) - r["ts"])),
+        abs(r["ts"] - bj_hour_start_utc(r["ts"])),
         r["ts"]
     ))
     keep.append(closest)
