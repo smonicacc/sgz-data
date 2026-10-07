@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>sgz</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+#toolbar{display:flex;flex-direction:column;align-items:stretch;margin:10px 0 16px;font-family:sans-serif;font-size:18px;gap:28px;}
+.toolbar-nav{display:flex;justify-content:flex-start;padding:8px 4px 12px;border-bottom:1px solid #e0e0e6;}
+.toolbar-controls{display:flex;align-items:center;gap:16px;}
+.toolbar-controls .toolbar-group:last-child{margin-left:auto;}
+.toolbar-group{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;white-space:nowrap;}
+#toolbar select{padding:8px 12px;font-size:20px;}
+#refreshStatus{color:#888;font-size:13px;}
+.nav-link{color:#475569;text-decoration:none;font-weight:500;font-size:18px;display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:4px;}
+/* 统一 link / visited / hover / active 四态颜色，避免浏览器默认 visited 蓝色干扰 */
+.nav-link:link,.nav-link:visited,.nav-link:hover,.nav-link:active{color:#475569;text-decoration:none;}
+/* SVG 图标：紫色圆底 + 白色回旋箭头，提示点击 */
+.nav-emoji{display:inline-block;vertical-align:middle;margin-right:2px;}
+#chart{width:100%;height:930px;}
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <div class="toolbar-nav">
+    <a href="./index.html" class="nav-link"><svg class="nav-emoji" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#8B5CF6"/><path d="M14.5 7l-5 5 5 5" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>前往：预约数据</a>
+  </div>
+  <div class="toolbar-controls">
+    <div class="toolbar-group">
+      <label for="chartSelect">图表：</label>
+      <select id="chartSelect">
+        <option value="view" selected>抖音话题播放数</option>
+        <option value="user">抖音话题参与人数</option>
+        <option value="sgz">尚公主抖音号</option>
+      </select>
+    </div>
+    <div class="toolbar-group">
+      <label for="rangeSelect">时间范围：</label>
+      <select id="rangeSelect">
+        <option value="3d" selected>最近3天</option>
+        <option value="7d">最近7天</option>
+        <option value="14d">最近14天</option>
+        <option value="month:9">9月</option>
+        <option value="month:10">10月</option>
+        <option value="all">全部</option>
+      </select>
+      <span id="refreshStatus"></span>
+    </div>
+  </div>
+</div>
+<div id="chart"></div>
+<script>
+// ---- 状态 ----
+let currentRange = '3d';
+let currentMetric = 'view';  // 'view' = 播放数(view_count)，'user' = 参与人数(user_count)
+let refreshTimer = null;
+let allData = [];
+let currentFiltered = [];
+let currentRangeObj = null;
+
+// ---- 系列基础配置：3 条话题，前缀决定字段名 ----
+// 播放数用原色（紫/红/蓝），参与人数用更鲜艳的色以在白底区分
+const SERIES_BASE = [
+  { name: '#昀牵孟绕', prefix: 'yqmr',
+    viewColor: '#7D4698', viewBarColor: '#B197C4',
+    userColor: '#7C3AED', userBarColor: '#C4B5FD' },
+  { name: '#尚公主',  prefix: 'sgz',
+    viewColor: '#c0392b', viewBarColor: '#E58B7E',
+    userColor: '#DC2626', userBarColor: '#F87171' },
+  { name: '#扶摇直尚', prefix: 'fyzs',
+    viewColor: '#5794F2', viewBarColor: '#A8C5FA',
+    userColor: '#2563EB', userBarColor: '#93C5FD' },
+];
+
+// 按当前指标算出 SERIES：view → view_count（原色），user → user_count（更鲜艳）
+function getSeries() {
+  const isUser = currentMetric === 'user';
+  const suffix = isUser ? 'user_count' : 'view_count';
+  return SERIES_BASE.map(s => ({
+    name: s.name,
+    field: `${s.prefix}_douyin_tag_${suffix}`,
+    color: isUser ? s.userColor : s.viewColor,
+    barColor: isUser ? s.userBarColor : s.viewBarColor,
+  }));
+}
+
+// 图表元信息：标题随指标变（Y 轴单位按数据量级自动选，不在这里硬绑）
+function getChartMeta() {
+  if (currentMetric === 'user') {
+    return {
+      lineTitle: '抖音话题参与人数',
+      barTitle: '参与人数增量',
+    };
+  }
+  return {
+    lineTitle: '抖音话题播放数',
+    barTitle: '播放数增量',
+  };
+}
+
+const chartDom = document.getElementById('chart');
+let subChart = echarts.init(chartDom);
+const rangeSelect = document.getElementById('rangeSelect');
+const refreshStatus = document.getElementById('refreshStatus');
+
+// ---- 时间范围解析 ----
+function parseRange(rangeValue) {
+  if (rangeValue === '3d' || rangeValue === '7d' || rangeValue === '14d') {
+    const days = rangeValue === '3d' ? 3 : rangeValue === '7d' ? 7 : 14;
+    return {
+      min: Date.now() - days * 86400 * 1000,
+      max: Date.now(),
+    };
+  }
+  const m = rangeValue.match(/^month:(\d+)$/);
+  if (m) {
+    const year = new Date().getFullYear();
+    const month = parseInt(m[1], 10);  // 1-based
+    return {
+      // 月份用半开区间 [min, max)：10/1 0:00 这种"下月首条"算在 10月，不算在 9月
+      min: new Date(year, month - 1, 1).getTime(),
+      max: new Date(year, month, 1).getTime(),
+      maxInclusive: false,
+    };
+  }
+  if (rangeValue === 'all') return { min: -Infinity, max: Infinity };
+  return { min: Date.now() - 3 * 86400 * 1000, max: Date.now() };
+}
+
+// 按 1 小时桶分桶（BJ 整点）
+// mode='latest'：桶内取 ts 最大的记录（line 折点用，表示"截至桶末的累计值"）
+// mode='first'：桶内取 ts 最小的记录（bar 用，表示"桶起点的瞬时值"）
+// 用于 3d/7d：把十几分钟一条的数据合并到小时级，避免点过密
+function bucketizeHourClosest(filtered, mode = 'latest') {
+  const BJ_OFFSET = 8 * 3600;
+  const buckets = new Map();
+  for (const r of filtered) {
+    const ms = r.ts * 1000 + BJ_OFFSET * 1000;
+    const bjH = Math.floor(ms / 3600000);
+    const keyUtc = bjH * 3600 - BJ_OFFSET;
+    const arr = buckets.get(keyUtc) || [];
+    arr.push(r);
+    buckets.set(keyUtc, arr);
+  }
+  const cmp = mode === 'first'
+    ? (best, r) => r.ts < best.ts ? r : best
+    : (best, r) => r.ts > best.ts ? r : best;
+  return [...buckets.entries()].map(([key, arr]) => arr.reduce(cmp, arr[0]));
+}
+
+// 按 4 小时桶分桶（BJ 0/4/8/12/16/20 点）
+// mode='latest'：桶内取 ts 最大的记录（截至桶末的累计值）
+// mode='first'：桶内取 ts 最小的记录（数据通常偏晚 1-2 分钟，所以 first ≈ 桶起点的瞬时值）
+// mode='closest'：桶内取离桶边界 ts 最近的记录（保留原始 ts，不强制对齐到边界）
+function bucketizeFourHourClosest(filtered, mode = 'latest') {
+  const BJ_OFFSET = 8 * 3600;
+  const buckets = new Map();
+  for (const r of filtered) {
+    const ms = r.ts * 1000 + BJ_OFFSET * 1000;
+    const bjH = Math.floor(ms / 3600000);
+    const evenH = bjH - (bjH % 4);
+    const keyUtc = evenH * 3600 - BJ_OFFSET;
+    const arr = buckets.get(keyUtc) || [];
+    arr.push(r);
+    buckets.set(keyUtc, arr);
+  }
+  if (mode === 'closest') {
+    return [...buckets.entries()].map(([key, arr]) => arr.reduce((best, r) => {
+      const d = Math.abs(r.ts - key);
+      const bd = Math.abs(best.ts - key);
+      // 同距离时取 ts 较大的，让点偏向桶后半（与 latest 行为一致的方向）
+      if (d < bd) return r;
+      if (d === bd && r.ts > best.ts) return r;
+      return best;
+    }, arr[0]));
+  }
+  const cmp = mode === 'first'
+    ? (best, r) => r.ts < best.ts ? r : best
+    : (best, r) => r.ts > best.ts ? r : best;
+  return [...buckets.entries()].map(([key, arr]) => arr.reduce(cmp, arr[0]));
+}
+
+// 按 1 天桶分桶（BJ 零点）
+// mode='latest'：桶内取 ts 最大的记录（截至桶末的累计值）
+// mode='first'：桶内取 ts 最小的记录（数据通常偏晚 1-2 分钟，所以 first ≈ 桶起点的瞬时值）
+// mode='closest'：桶内取离桶边界（BJ 0:00）ts 最近的记录（保留原始 ts，不强制对齐到边界）
+function bucketizeDayClosest(filtered, mode = 'latest') {
+  const BJ_OFFSET = 8 * 3600;
+  const buckets = new Map();
+  for (const r of filtered) {
+    const ms = r.ts * 1000 + BJ_OFFSET * 1000;
+    const bjH = Math.floor(ms / 3600000);
+    const bjDayH = Math.floor(bjH / 24) * 24;
+    const keyUtc = bjDayH * 3600 - BJ_OFFSET;
+    const arr = buckets.get(keyUtc) || [];
+    arr.push(r);
+    buckets.set(keyUtc, arr);
+  }
+  if (mode === 'closest') {
+    return [...buckets.entries()].map(([key, arr]) => arr.reduce((best, r) => {
+      const d = Math.abs(r.ts - key);
+      const bd = Math.abs(best.ts - key);
+      // 同距离时取 ts 较大的，让点偏向桶后半（与 latest 行为一致的方向）
+      if (d < bd) return r;
+      if (d === bd && r.ts > best.ts) return r;
+      return best;
+    }, arr[0]));
+  }
+  const cmp = mode === 'first'
+    ? (best, r) => r.ts < best.ts ? r : best
+    : (best, r) => r.ts > best.ts ? r : best;
+  return [...buckets.entries()].map(([key, arr]) => arr.reduce(cmp, arr[0]));
+}
+
+// ---- Y 轴范围：根据传入的系列数据计算 min/max ----
+// pad = 10%；min 向下 round 到 1e6 倍数，max 向上 round
+// 按数值量级自动选单位：>=1亿 → 亿；>=1万 → 万；否则原值
+function pickUnit(maxAbs) {
+  if (maxAbs >= 1e8) return { divisor: 1e8, unit: '亿' };
+  if (maxAbs >= 1e4) return { divisor: 1e4, unit: '万' };
+  return { divisor: 1, unit: '' };
+}
+
+// 把原始步长 round 到 1, 2, 5 × 10^n（nice number），避免大数量级 + 小变化被大步长放大
+// 例：raw=90882 → 100000；raw=375 → 500；raw=12.5 → 20
+function niceStep(raw) {
+  if (raw <= 0) return 1;
+  const exp = Math.floor(Math.log10(raw));
+  const base = Math.pow(10, exp);
+  const mantissa = raw / base;
+  let nice;
+  if (mantissa <= 1) nice = 1;
+  else if (mantissa <= 2) nice = 2;
+  else if (mantissa <= 5) nice = 5;
+  else nice = 10;
+  return nice * base;
+}
+
+function computeYRange(seriesArr) {
+  const values = seriesArr.flatMap(s => s.data.map(d => d[1]));
+  if (values.length === 0) return null;
+  const vMin = Math.min(...values);
+  const vMax = Math.max(...values);
+  const range = vMax - vMin;
+  const pad = range * 0.1 || vMin * 0.001;
+  // 单位按 max 的量级自动选（max 决定刻度，min 不会让单位跳级）
+  const { divisor, unit } = pickUnit(Math.max(Math.abs(vMax), Math.abs(vMin)));
+  // 步长按数据实际变化范围算（除以 splitNumber），再 round 到 nice number
+  // 旧版本用 divisor/10，对大数量级 + 小变化数据（如 fyzs 播放数 ~3.28亿，变化仅 72.7万）会把范围从 72.7万 拉到 1000万
+  const splitNumber = 8;
+  const rawStep = (range / splitNumber) || (divisor / 10);
+  const step = niceStep(rawStep);
+  return {
+    min: Math.floor((vMin - pad) / step) * step,
+    max: Math.ceil((vMax + pad) / step) * step,
+    unit: { divisor, unit },
+    step,
+  };
+}
+
+// ---- 增量柱的 Y 轴范围：保证 0 在范围内，pad=10% ----
+// bar data 是纯 value 数组（不是 [ts, val] 对），所以直接用 d 不用 d[1]
+// 没负值时不向下 pad，避免 Y 轴多出一段没意义的负区间
+function computeYBarRange(seriesArr) {
+  const values = seriesArr.flatMap(s => s.data);
+  if (values.length === 0) return null;
+  const vMin = Math.min(0, ...values);
+  const vMax = Math.max(0, ...values);
+  const pad = (vMax - vMin) * 0.1 || 1;
+  const { divisor, unit } = pickUnit(Math.max(Math.abs(vMax), Math.abs(vMin)));
+  const step = divisor / 10;
+  return {
+    min: vMin < 0 ? Math.floor((vMin - pad) / step) * step : 0,
+    max: Math.ceil((vMax + pad) / step) * step,
+    unit: { divisor, unit },
+  };
+}
+
+// 计算每桶相对前一桶的增量（data 是 [[ts, value], ...] 已按 ts 升序）
+function computeDeltas(data) {
+  return data.map((d, i) => [d[0], i === 0 ? 0 : d[1] - data[i - 1][1]]);
+}
+
+// ---- 尚公主抖音号专用渲染：双 Y 轴折线图（单 chart 单 grid）----
+// 左 Y：总获赞（sgz_total_favorited），紫色
+// 右 Y：粉丝数（sgz_follower_count），橙色
+const SGZ_SERIES = [
+  { name: '总获赞', field: 'sgz_total_favorited', color: '#4b7ae2', yAxisIndex: 0 },
+  { name: '粉丝数', field: 'sgz_follower_count', color: '#FF9900', yAxisIndex: 1 },
+];
+
+function renderSgzChart(baseFiltered, range, selectedMap = {
+  '总获赞': true,
+  '粉丝数': true,
+}) {
+  // chart 高度由 applyRange 设到 700px，这里不需要重复设
+  if (!baseFiltered.length) {
+    subChart.clear();
+    subChart.setOption({
+      title: { text: '尚公主抖音号', left: 'center', subtext: '该时间范围内无数据' },
+    });
+    return;
+  }
+
+  // 沿用同样的桶策略
+  let lineData = baseFiltered;
+  if (currentRange === '3d') lineData = bucketizeHourClosest(baseFiltered);
+  else if (currentRange === '7d') lineData = bucketizeFourHourClosest(baseFiltered);
+  else if (currentRange === '14d' || currentRange === 'all' || /^month:/.test(currentRange)) lineData = bucketizeDayClosest(baseFiltered);
+
+  const xMin = lineData[0].ts * 1000;
+  const xMax = lineData[lineData.length - 1].ts * 1000;
+
+  // 计算两条线的 Y 轴范围和单位
+  const calcRange = (vals) => {
+    if (!vals.length) return { min: 0, max: 1, unit: { divisor: 1, unit: '' } };
+    const vMin = Math.min(...vals);
+    const vMax = Math.max(...vals);
+    const pad = (vMax - vMin) * 0.1 || vMin * 0.001;
+    const { divisor, unit } = pickUnit(Math.max(Math.abs(vMax), Math.abs(vMin)));
+    const step = divisor / 10;
+    return {
+      min: Math.floor((vMin - pad) / step) * step,
+      max: Math.ceil((vMax + pad) / step) * step,
+      unit: { divisor, unit },
+    };
+  };
+  const leftR = calcRange(lineData.map(r => r.sgz_total_favorited).filter(v => v != null));
+  const rightR = calcRange(lineData.map(r => r.sgz_follower_count).filter(v => v != null));
+
+  const xLabelFormatter = (val) => {
+    const d = new Date(val);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+  const xTickFilter = (val) => {
+    if (currentRange !== '7d') return xLabelFormatter(val);
+    const d = new Date(val);
+    if (d.getHours() !== 0) return '';
+    return xLabelFormatter(val);
+  };
+
+  // 不调 clear()，让 setOption 直接接管整个 option（避免 legend 状态被清掉导致视觉上消失）
+  subChart.setOption({
+    animation: false,
+    title: { text: '尚公主抖音号', left: 'center', top: 5 },
+    legend: {
+      top: 40,
+      left: 'center',
+      data: SGZ_SERIES.map(s => s.name),
+      textStyle: { fontSize: 14 },
+      backgroundColor: '#f5f5fa',
+      borderColor: '#c9c9d6',
+      borderWidth: 1,
+      borderRadius: 6,
+      padding: [10, 20],
+      itemGap: 24,
+      itemWidth: 18,
+      itemHeight: 12,
+      selected: selectedMap,
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', label: { backgroundColor: '#555' } },
+      valueFormatter: v => v == null ? '-' : v.toLocaleString('en-US'),
+      formatter: (params) => {
+        if (!params || !params.length) return '';
+        const ts = params[0].axisValue;
+        const dateStr = xLabelFormatter(ts);
+        let html = `${dateStr}<br/>`;
+        params.forEach(p => {
+          const val = p.value == null ? '-' :
+            Array.isArray(p.value) ? p.value[1].toLocaleString('en-US') :
+            p.value.toLocaleString('en-US');
+          html += `${p.marker} ${p.seriesName}: ${val}<br/>`;
+        });
+        return html;
+      },
+    },
+    grid: { left: 70, right: 70, top: 100, bottom: 70 },
+    xAxis: {
+      type: 'time',
+      min: Math.max(range.min, xMin),
+      max: Math.min(range.max, xMax),
+      axisLabel: { rotate: 30, hideOverlap: true, formatter: xTickFilter },
+      axisLine: { show: true, lineStyle: { color: '#555' } },
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '总获赞',
+        position: 'left',
+        min: leftR.min,
+        max: leftR.max,
+        splitNumber: 8,
+        nameTextStyle: { color: '#4b7ae2', fontSize: 12 },
+        axisLine: { show: true, lineStyle: { color: '#4b7ae2' } },
+        axisLabel: {
+          formatter: v => (v / leftR.unit.divisor).toFixed(2) + leftR.unit.unit,
+          color: '#4b7ae2',
+        },
+        splitLine: { show: true, lineStyle: { color: '#eee' } },
+      },
+      {
+        type: 'value',
+        name: '粉丝数',
+        position: 'right',
+        min: rightR.min,
+        max: rightR.max,
+        splitNumber: 8,
+        nameTextStyle: { color: '#FF9900', fontSize: 12 },
+        axisLine: { show: true, lineStyle: { color: '#FF9900' } },
+        axisLabel: {
+          formatter: v => (v / rightR.unit.divisor).toFixed(2) + rightR.unit.unit,
+          color: '#FF9900',
+        },
+        splitLine: { show: false },
+      },
+    ],
+    series: SGZ_SERIES
+      .filter(s => selectedMap[s.name])
+      .map(s => ({
+        name: s.name,
+        type: 'line',
+        yAxisIndex: s.yAxisIndex,
+        data: lineData
+          .filter(r => r[s.field] != null)
+          .map(r => [r.ts * 1000, r[s.field]]),
+        smooth: false,
+        symbol: 'circle',
+        symbolSize: 4,
+        lineStyle: { width: 2, color: s.color },
+        itemStyle: { color: s.color },
+        emphasis: { focus: 'none' },
+      })),
+  }, true);
+}
+
+// ---- 折线 + 柱状图渲染（同一 chart，两个 grid）----
+function renderChart(baseFiltered, range, selectedMap = {
+  '#昀牵孟绕': true,
+  '#尚公主': false,
+  '#扶摇直尚': false,
+}) {
+  if (!baseFiltered.length) {
+    subChart.clear();
+    subChart.setOption({
+      title: { text: getChartMeta().lineTitle, left: 'center', subtext: '该时间范围内无数据' },
+    });
+    return;
+  }
+
+  // 折线时间桶：3d → 1h（最小粒度）；7d → 4h（对齐 BJ 0/4/8/12/16/20）；14d/month/all → 1d
+  let lineData = baseFiltered;
+  if (currentRange === '3d') {
+    lineData = bucketizeHourClosest(baseFiltered);
+  } else if (currentRange === '7d') {
+    lineData = bucketizeFourHourClosest(baseFiltered, 'closest');
+  } else if (currentRange === '14d' || currentRange === 'all' || /^month:/.test(currentRange)) {
+    lineData = bucketizeDayClosest(baseFiltered, 'closest');
+  }
+
+  // category 轴：直接喂格式化好的字符串给 ECharts
+  // X 轴 label 对齐到桶边界时刻（不取桶内数据点）—— 4h 桶 → 0/4/8/12/16/20；1d 桶 → 0:00
+  const isDayBucket = (currentRange === '14d' || currentRange === 'all' || /^month:/.test(currentRange));
+  const BJ_OFFSET = 8 * 3600;
+  const bucketBoundaryUtc = (ts) => {
+    const ms = ts * 1000 + BJ_OFFSET * 1000;
+    const bjH = Math.floor(ms / 3600000);
+    const bucketH = isDayBucket ? Math.floor(bjH / 24) * 24 : bjH - (bjH % 4);
+    return bucketH * 3600 - BJ_OFFSET;
+  };
+  const fmtTick = (val) => {
+    const d = new Date(val);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  // 柱状时间桶：≤7d → 4h；>7d（含 14d/month/all） → 1d（独立于折线桶）
+  // bar 用 first 模式：取桶起点（≈ 桶边界时刻）作为桶代表值
+  // 例：4h 桶 "0:00" 的代表值 = first-after-0:00 的记录值；bar at X = "X → X+step 增量"
+  // 桶归属按"窗口结束时刻 endBoundary"决定（用户确认 9/30 的 bar 归到 10月）。
+  // 注意：bar 桶从 allData 而非 baseFiltered 取，这样 10月视图能拿到 9/30 桶
+  // （其记录在 9月 filter 内，但 END=10/1 在 10月），由下面的 END filter 收口。
+  const bucketStepSec = isDayBucket ? 24 * 3600 : 4 * 3600;
+  const rangeMinSec = range.min / 1000;
+  const rangeMaxSec = range.max / 1000;
+  // 最后一个有效记录的 ts（秒）——用于判断 partial 末位桶 + barXCategories 标签 fallback。
+  const lastDataTsSec = allData.length ? allData[allData.length - 1].ts : 0;
+  const isMonthRange = /^month:/.test(currentRange);
+  const allBarBuckets = (isDayBucket)
+    ? bucketizeDayClosest(allData, 'first')
+    : bucketizeFourHourClosest(allData, 'first');
+  const barData = allBarBuckets.filter(b => {
+    const endBoundary = bucketBoundaryUtc(b.ts) + bucketStepSec;
+    // 月度：endBoundary 必须严格小于 rangeMax（半开区间）。9/30 桶 endBoundary=10/1 = rangeMax，
+    // 落到 10月，不进 9月。
+    // 非月度（3d/14d/all 等）：允许 partial 末位桶超出 rangeMax 不超过 1 step。
+    if (endBoundary < rangeMinSec) return false;
+    if (isMonthRange) {
+      if (endBoundary >= rangeMaxSec) return false;
+    } else {
+      if (endBoundary > rangeMaxSec + bucketStepSec) return false;
+    }
+    // 排除"末位不满桶"：endBoundary 之后没有数据（endBoundary > lastDataTsSec），
+    // 即当前窗口的时间还没走完就停在这了。这种 bar 不显示（用户确认）。
+    if (endBoundary > lastDataTsSec) return false;
+    return true;
+  });
+
+  // bar X 轴 label：endBoundary（窗口结束时刻），与桶归属同源。
+  //   - 4h 桶："10/5 16:00" = "12→16 增量"。
+  //   - 1d 桶："9/24 00:00" = "9/23 0→9/24 0 增量"。
+  //   - partial bar：endBoundary 还没到时退回 lastDataTsSec，避免显示未来时刻。
+  const barXCategories = barData.map(b => {
+    const endBoundary = bucketBoundaryUtc(b.ts) + bucketStepSec;
+    const labelTs = endBoundary > lastDataTsSec ? lastDataTsSec : endBoundary;
+    return fmtTick(labelTs * 1000);
+  });
+
+  // 计算 3 条系列的数据（折线：原始值；柱状：X → X+step 的增量）
+  const seriesData = getSeries().map(s => ({
+    ...s,
+    data: lineData
+      .filter(r => r[s.field] != null)
+      .map(r => [r.ts * 1000, r[s.field]]),
+  }));
+  const barSeriesData = getSeries().map(s => {
+    const field = s.field;
+    // 在 allData 里找"X+step 之后最近"的值。
+    // 如果 X+step 之后没有数据（最后一个桶还没跑完），fallback 到全数据最后一条 → 显示"截至当前"的增量
+    const findFirstAfter = (boundary) => {
+      let lastVal = null;
+      for (const r of allData) {
+        if (r[field] != null) {
+          lastVal = r[field];
+          if (r.ts * 1000 >= boundary * 1000) return r[field];
+        }
+      }
+      return lastVal;
+    };
+    // category 轴下 bar data 用纯 value（按索引对齐到 barXCategories），不再带 [ts, val] 对
+    const deltas = barData.map(b => {
+      if (b[field] == null) return 0;
+      const startBoundary = bucketBoundaryUtc(b.ts);
+      const startVal = b[field]; // first-after-startBoundary
+      const endBoundary = startBoundary + bucketStepSec;
+      const endVal = findFirstAfter(endBoundary);
+      if (endVal == null) return 0; // 该 field 完全没数据
+      return endVal - startVal;
+    });
+    return { ...s, data: deltas };
+  });
+
+  // Y 轴范围按当前选中系列算
+  const initialLine = seriesData.filter(s => selectedMap[s.name]);
+  const initialBar = barSeriesData.filter(s => selectedMap[s.name]);
+  const yRange = computeYRange(initialLine);
+  const yBarRange = computeYBarRange(initialBar);
+
+  // X 轴 min/max（用折线数据的时间范围，与 bar 共享）
+  const xMin = lineData[0].ts * 1000;
+  const xMax = lineData[lineData.length - 1].ts * 1000;
+
+  // 缓存给 legend 切换使用
+  lastSeriesData = seriesData;
+  lastBarSeriesData = barSeriesData;
+
+  const xLabelFormatter = (val) => {
+    const d = new Date(val);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+
+  // 7d 折线/柱状用 4h 桶，标签太密；只在 BJ 0:00 显示（每 24h 一根）
+  const xTickFilter = (val) => {
+    if (currentRange !== '7d') return xLabelFormatter(val);
+    const d = new Date(val);
+    if (d.getHours() !== 0) return '';
+    return xLabelFormatter(val);
+  };
+
+  subChart.clear();
+  subChart.setOption({
+    animation: false,
+    title: [
+      { text: getChartMeta().lineTitle, left: 'center', top: 5 },
+      { text: getChartMeta().barTitle, left: 'center', top: 515 },
+    ],
+    legend: {
+      top: 445,
+      left: 'center',
+      data: getSeries().map(s => s.name),
+      textStyle: { fontSize: 15 },
+      // 背景 + 浅边框让 legend 区视觉上突出，引导用户点击
+      backgroundColor: '#f5f5fa',
+      borderColor: '#c9c9d6',
+      borderWidth: 1,
+      borderRadius: 6,
+      padding: [14, 24],
+      itemGap: 24,
+      itemWidth: 18,
+      itemHeight: 12,
+      selected: selectedMap,
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', label: { backgroundColor: '#555' } },
+      valueFormatter: v => v == null ? '-' : v.toLocaleString('en-US'),
+      // 折线 axisValue 是 ts 毫秒，柱状 axisValue 已是格式化字符串；按 series 实际类型区分
+      formatter: (params) => {
+        if (!params || !params.length) return '';
+        const firstSeries = params[0];
+        // 柱状图 series 的 data 形态是纯 value（按索引对齐 category），所以对应 axisValue 是字符串
+        const isBar = firstSeries.seriesType === 'bar';
+        let dateStr;
+        if (isBar) {
+          // 取这个 category 对应的真实时间戳：找到第一个 line 系列，用它的 data[xAxisIndex==0 的 idx 转换] 反推不可行，
+          // 简单做法：直接从 fmtTick 反向——这里直接用 axisValueLabel
+          dateStr = String(firstSeries.axisValueLabel ?? firstSeries.axisValue);
+        } else {
+          dateStr = xLabelFormatter(firstSeries.axisValue);
+        }
+        let html = `${dateStr}<br/>`;
+        params.forEach(p => {
+          const val = p.value == null ? '-' :
+            Array.isArray(p.value) ? p.value[1].toLocaleString('en-US') :
+            p.value.toLocaleString('en-US');
+          html += `${p.marker} ${p.seriesName}: ${val}<br/>`;
+        });
+        return html;
+      },
+    },
+    grid: [
+      { left: 70, right: 30, top: 55, height: 290 },   // 折线（自带 X 轴在底部）
+      { left: 70, right: 30, top: 560, height: 280 },  // 柱状（自带 X 轴在底部）
+    ],
+    xAxis: [
+      {
+        type: 'time',
+        gridIndex: 0,
+        min: Math.max(range.min, xMin),
+        max: Math.min(range.max, xMax),
+        axisLabel: {
+          rotate: 30,
+          hideOverlap: true,
+          formatter: xTickFilter,
+        },
+        axisLine: { show: true, lineStyle: { color: '#555' } },
+      },
+      {
+        type: 'category',
+        gridIndex: 1,
+        data: barXCategories,
+        axisLabel: {
+          rotate: 30,
+          hideOverlap: false,
+          // 按"日期切换处"过滤：每个跨日的那根显示一次，一天一根（之前的 / 00:00$/ 在改成
+          // 显示数据点时间后失效，因为数据点时间是 23:15、03:15 之类，不在整点）
+          interval: (idx) => {
+            if (idx === 0) return true;
+            const prevDay = barXCategories[idx - 1].split(' ')[0];
+            const currDay = barXCategories[idx].split(' ')[0];
+            return prevDay !== currDay;
+          },
+          formatter: (val) => val,
+        },
+        axisLine: { show: true, lineStyle: { color: '#555' } },
+      },
+    ],
+    yAxis: [
+      {
+        type: 'value',
+        gridIndex: 0,
+        position: 'left',
+        min: yRange ? yRange.min : 0,
+        max: yRange ? yRange.max : 1,
+        // 显式 interval：阻止 ECharts 因 niceTick 进一步扩展 min/max
+        interval: yRange ? yRange.step : undefined,
+        splitNumber: 8,
+        axisLine: { show: true, lineStyle: { color: '#555' } },
+        axisLabel: {
+          formatter: v => {
+            const u = yRange ? yRange.unit : { divisor: 1, unit: '' };
+            return (v / u.divisor).toFixed(3) + u.unit;
+          },
+        },
+      },
+      {
+        type: 'value',
+        gridIndex: 1,
+        position: 'left',
+        min: yBarRange ? yBarRange.min : 0,
+        max: yBarRange ? yBarRange.max : 1,
+        splitNumber: 6,
+        // 柱状分桶：≤7d 是 4h 桶，14d/all 是 1d 桶，单位名跟着变
+        name: (currentRange === '14d' || currentRange === 'all' || /^month:/.test(currentRange)) ? '/天' : '/4小时',
+        nameLocation: 'end',
+        nameGap: 8,
+        nameTextStyle: { color: '#888', fontSize: 12 },
+        axisLine: { show: true, lineStyle: { color: '#555' } },
+        axisLabel: {
+          formatter: v => {
+            const u = yBarRange ? yBarRange.unit : { divisor: 1, unit: '' };
+            return (v / u.divisor).toFixed(0) + u.unit;
+          },
+        },
+      },
+    ],
+    series: [
+      // 折线（顶）
+      ...seriesData.map(s => ({
+        name: s.name,
+        type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: s.data,
+        smooth: false,
+        symbol: 'circle',
+        symbolSize: 4,
+        lineStyle: { width: 2, color: s.color },
+        itemStyle: { color: s.color },
+        // focus: 'none' 阻止鼠标 hover legend 时其他 series 变灰
+        emphasis: { focus: 'none' },
+      })),
+      // 柱状（底）—— 同一 name 的 line + bar 在 legend 上是同一条
+      // 只放选中的 bar series：隐藏的 series 不参与 ECharts 的 group 布局，否则 1 条可见也会被分到 1/3 槽宽
+      // barWidth 按可见 series 数动态算：1 条 80%，2 条各 40%，3 条各 27%，刚好填满 80% 槽宽，不重叠
+      ...(() => {
+        const visibleBar = barSeriesData.filter(s => selectedMap[s.name]);
+        const n = visibleBar.length || 1;
+        const perBarPct = Math.floor(80 / n);
+        return visibleBar.map(s => ({
+          name: s.name,
+          type: 'bar',
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: s.data,
+          itemStyle: { color: s.barColor },
+          barWidth: `${perBarPct}%`,
+          barCategoryGap: '0%',
+          barGap: '0%',
+        }));
+      })(),
+    ],
+  }, true);
+}
+
+// ---- legend 点击 → 折线和柱状两个 Y 轴范围都跟着所选系列自适应 ----
+// 同时重建 bar series 数组，只放选中的；隐藏的 series 不进 series 数组，
+// 缓存最近一次渲染的系列数据（含 data），供 legend 切换时重算 Y 轴范围
+let lastSeriesData = [];
+let lastBarSeriesData = [];
+// sgz 图表的 legend 选中状态（独立于 view/user 的 selectedMap）
+let lastSgzSelected = { '总获赞': true, '粉丝数': true };
+
+// 这样 ECharts 的 group 布局就不会把它算进去，可见 bar 能真正拿到 80% 槽宽
+// 直接重画整个图（notMerge: true），强制 ECharts 重新算布局
+function applyLegendFilter(selectedMap) {
+  if (currentMetric === 'sgz') {
+    // sgz 用 ECharts 默认的 legend 行为（点 legend 自动隐藏 series），不动整图。
+    // 只用局部 setOption 把对应 Y 轴隐藏，并显式带上 splitNumber + splitLine.lineStyle，
+    // 避免 splitLine 配置在切换时被覆盖
+    lastSgzSelected = selectedMap;
+    const leftSelected = selectedMap['总获赞'] !== false;
+    const rightSelected = selectedMap['粉丝数'] !== false;
+    subChart.setOption({
+      legend: { selected: selectedMap },
+      yAxis: [
+        {
+          show: leftSelected,
+          axisLine: { show: leftSelected, lineStyle: { color: '#4b7ae2' } },
+          axisLabel: { show: leftSelected, color: '#4b7ae2' },
+          nameTextStyle: { color: '#4b7ae2', fontSize: 12 },
+          splitNumber: 8,
+          splitLine: { show: leftSelected, lineStyle: { color: '#eee' } },
+        },
+        {
+          show: rightSelected,
+          axisLine: { show: rightSelected, lineStyle: { color: '#FF9900' } },
+          axisLabel: { show: rightSelected, color: '#FF9900' },
+          nameTextStyle: { color: '#FF9900', fontSize: 12 },
+          splitNumber: 8,
+          splitLine: { show: false },
+        },
+      ],
+    });
+  } else {
+    renderChart(currentFiltered, currentRangeObj, selectedMap);
+  }
+}
+
+// ---- 应用当前范围 ----
+function applyRange() {
+  currentRangeObj = parseRange(currentRange);
+  // 只按时间范围过滤，分桶交给 renderChart（折线/柱状各自决定）
+  currentFiltered = allData.filter(r => {
+    const tsMs = r.ts * 1000;
+    if (tsMs < currentRangeObj.min) return false;
+    // 月份用半开区间 [min, max)，避免下月首条记录被重复计入上月
+    return currentRangeObj.maxInclusive === false
+      ? tsMs < currentRangeObj.max
+      : tsMs <= currentRangeObj.max;
+  });
+  if (currentMetric === 'sgz') {
+    // sgz 是单图，把 chart 容器缩小到 560px（双图模式是 930px）
+    chartDom.style.height = '560px';
+    subChart.resize();
+    renderSgzChart(currentFiltered, currentRangeObj, lastSgzSelected);
+  } else {
+    chartDom.style.height = '930px';
+    subChart.resize();
+    renderChart(currentFiltered, currentRangeObj);
+  }
+}
+
+// ---- 自动刷新 ----
+function startAutoRefresh() {
+  stopAutoRefresh();
+  refreshTimer = setInterval(async () => {
+    await loadData();
+    refreshStatus.textContent = `自动刷新中…（${new Date().toLocaleTimeString()}）`;
+  }, 60000);
+  refreshStatus.textContent = `自动刷新中…（${new Date().toLocaleTimeString()}）`;
+}
+function stopAutoRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  refreshStatus.textContent = '已停止自动刷新';
+}
+
+// ---- 数据加载 ----
+async function loadData() {
+  const res = await fetch('./douyin.json?t=' + Date.now());
+  allData = await res.json();
+  applyRange();
+}
+
+// ---- 初始化 ----
+const chartSelect = document.getElementById('chartSelect');
+chartSelect.addEventListener('change', () => {
+  currentMetric = chartSelect.value;
+  applyRange();
+});
+
+rangeSelect.addEventListener('change', () => {
+  currentRange = rangeSelect.value;
+  // 只有最近 3 天自动刷新，其他范围（含 7d / 14d / all）都停止
+  if (currentRange === '3d') {
+    startAutoRefresh();
+  } else {
+    stopAutoRefresh();
+  }
+  applyRange();
+});
+
+loadData().then(() => startAutoRefresh());
+
+// legend 切换 → Y 轴范围自适应（仅保留当前勾选系列的数值范围）
+subChart.on('legendselectchanged', (params) => {
+  applyLegendFilter(params.selected);
+});
+
+window.addEventListener('resize', () => subChart.resize());
+</script>
+</body>
+</html>

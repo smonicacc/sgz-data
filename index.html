@@ -5,10 +5,18 @@
 <title>sgz</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <style>
-#toolbar{display:flex;justify-content:space-between;align-items:center;margin:0 0 16px;font-family:sans-serif;font-size:18px;gap:10px;}
-.toolbar-group{display:flex;align-items:center;gap:10px;}
+#toolbar{display:flex;flex-direction:column;align-items:stretch;margin:10px 0 16px;font-family:sans-serif;font-size:18px;gap:28px;}
+.toolbar-nav{display:flex;justify-content:flex-end;padding:8px 4px 12px;border-bottom:1px solid #e0e0e6;}
+.toolbar-controls{display:flex;align-items:center;gap:16px;}
+.toolbar-controls .toolbar-group:last-child{margin-left:auto;}
+.toolbar-group{display:flex;align-items:center;gap:10px;flex-wrap:nowrap;white-space:nowrap;}
 #toolbar select{padding:8px 12px;font-size:20px;}
 #refreshStatus{color:#888;font-size:13px;}
+.nav-link{color:#475569;text-decoration:none;font-weight:500;font-size:18px;display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:4px;}
+/* 统一 link / visited / hover / active 四态颜色，避免浏览器默认 visited 蓝色干扰 */
+.nav-link:link,.nav-link:visited,.nav-link:hover,.nav-link:active{color:#475569;text-decoration:none;}
+/* SVG 图标：紫色圆底 + 白色前进箭头，提示点击 */
+.nav-emoji{display:inline-block;vertical-align:middle;margin-right:2px;}
 #chart{width:100%;height:600px;}
 #barChart{width:100%;height:400px;margin-top:20px;display:none;}
 #dataTable{border-collapse:collapse;width:100%;margin-top:20px;font-family:sans-serif;}
@@ -29,24 +37,30 @@
 </head>
 <body>
 <div id="toolbar">
-  <div class="toolbar-group">
-    <label for="chartSelect">图表：</label>
-    <select id="chartSelect">
-      <option value="line" selected>预约数</option>
-      <option value="bar">预约增量</option>
-    </select>
+  <div class="toolbar-nav">
+    <a href="./douyin.html" class="nav-link"><svg class="nav-emoji" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#8B5CF6"/><path d="M9.5 7l5 5-5 5" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>前往：抖音数据</a>
   </div>
-  <div class="toolbar-group">
-    <label for="rangeSelect">时间范围：</label>
-    <select id="rangeSelect">
-      <option value="3d" selected>最近3天</option>
-      <option value="7d">最近7天</option>
-      <option value="14d">最近14天</option>
-      <!-- 月份选项保留在 JS 中（parseRange/downsampleForChart/bucketize 等逻辑未删），需要时取消注释即可恢复 -->
-      <option value="month:9">9月</option>
-      <option value="month:10">10月</option>
-    </select>
-    <span id="refreshStatus"></span>
+  <div class="toolbar-controls">
+    <div class="toolbar-group">
+      <label for="chartSelect">图表：</label>
+      <select id="chartSelect">
+        <option value="line" selected>预约数</option>
+        <option value="bar">预约增量</option>
+      </select>
+    </div>
+    <div class="toolbar-group">
+      <label for="rangeSelect">时间范围：</label>
+      <select id="rangeSelect">
+        <option value="3d" selected>最近3天</option>
+        <option value="7d">最近7天</option>
+        <option value="14d">最近14天</option>
+        <!-- 月份选项保留在 JS 中（parseRange/downsampleForChart/bucketize 等逻辑未删），需要时取消注释即可恢复 -->
+        <option value="month:9">9月</option>
+        <option value="month:10">10月</option>
+        <option value="all">全部</option>
+      </select>
+      <span id="refreshStatus"></span>
+    </div>
   </div>
 </div>
 <div id="chart"></div>
@@ -107,6 +121,7 @@ function parseRange(rangeValue) {
       max: new Date(year, month, 1).getTime(),
     };
   }
+  if (rangeValue === 'all') return { min: -Infinity, max: Infinity };
   return { min: Date.now() - 3 * 86400 * 1000, max: Date.now() };
 }
 
@@ -241,6 +256,16 @@ function renderBarChart(filtered, range) {
     ? bucketizeHourClosest(expandTwoHourGaps(filtered))
     : bucketize(filtered, 'day', false, true).map(b => ({ ts: bjDayStart(b.ts), value: b.value }));
 
+  // 排除 <= DAY_CUM_START_BJ 当天的桶（按 BJ 日界比较）
+  // 跨日累积从 DAY_CUM_START_BJ 开始算，该天及更早没有 dayCum 上下文，
+  // 柱状图里硬塞进去会让首桶 delta 看起来怪（首日参考 = 09-08 等），直接不显示更干净。
+  // 仅影响柱状图，不动折线图/表格（表格/折线图仍按各自原有规则显示）。
+  if (DAY_CUM_START_BJ) {
+    // bjDayStartFromStrMs 返回 ms，b.ts 是 sec，统一转 ms 后比较
+    const cutoffBjStart = bjDayStartFromStrMs(DAY_CUM_START_BJ);
+    bucketed = bucketed.filter(b => b.ts * 1000 > cutoffBjStart);
+  }
+
   // ≤7 天：最后一个整点小时桶若还没"填满"（当前 hour 只走了 ≤30min），
   // bucketizeHourClosest 会选最接近整点的点（如 17:00:36），导致当前 hour 内
   // 后续的数据（17:15/17:30/17:45）被埋掉，柱状图上 17:00 那根柱就把整小时的
@@ -256,12 +281,32 @@ function renderBarChart(filtered, range) {
     }
   }
 
-  // 升序，每点 vs 前一点算 delta（首点无前序点 = 0）
+  // 升序，后续多处用到 sorted 视图
   const sorted = [...bucketed].sort((a, b) => a.ts - b.ts);
-  const deltas = sorted.map((r, i) => ({
-    ts: r.ts,
-    delta: i === 0 ? 0 : r.value - sorted[i - 1].value,
-  }));
+
+  // >7 天（天桶）：首桶没有前序桶，delta 会被置 0。
+  // 用"首桶的前一天"的首条作参考点，让首桶的 delta 反映真实的跨日增量。
+  // 注意：参考点的"前一天"取 sorted[0].ts - 86400（而非 range.min - 86400）——
+  // range.min 不一定在 BJ 日界（如 14d = now-14d 落在日中间），按它算会跳到更早一天。
+  // 参考点只用于算 delta，不画进 series，避免 X 轴扩展到 range.min 之外。
+  let dayFirstRef = null;
+  if (spanDays > 7 && sorted.length > 0) {
+    const prevDayStart = sorted[0].ts - 86400;
+    const prevDayRecords = allData.filter(r => bjDayStart(r.ts) === prevDayStart);
+    if (prevDayRecords.length > 0) {
+      const ref = prevDayRecords.reduce((b, r) => (r.ts < b.ts ? r : b), prevDayRecords[0]);
+      dayFirstRef = { ts: prevDayStart, value: ref.value };
+    }
+  }
+
+  // 每点 vs 前一点算 delta（天桶首点用 dayFirstRef 计算跨日增量；找不到 ref 兜底 0）
+  const deltas = sorted.map((r, i) => {
+    const prev = i === 0 ? dayFirstRef : sorted[i - 1];
+    return {
+      ts: r.ts,
+      delta: prev ? r.value - prev.value : 0,
+    };
+  });
 
   // Y 轴基于增量：>=0，最小步长 10
   const deltaValues = deltas.map(d => d.delta);
