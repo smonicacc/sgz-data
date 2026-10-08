@@ -62,19 +62,23 @@ jobs:
                     file=sys.stderr)
               INTERVAL_HOURS = 0
 
+          INTERVAL_SEC = INTERVAL_HOURS * 3600
           now = int(time.time())
 
+          # ----- Condition 1: 距上次 fetch 已到 N 小时（-5min 容差）----- #
+          # 现有的文件/ts 检查；保留 FORCE/异常路径语义不变。
+          cond1_due = False
+          cond1_reason = ""
           if INTERVAL_HOURS == 0:
-              # 0 = always due, skip file/ts check entirely.
-              due = True
-              reason = "DOUYIN_INTERVAL_HOURS=0 → always due"
+              # 0 = 始终 due，跳过文件/ts 检查。
+              cond1_due = True
+              cond1_reason = "DOUYIN_INTERVAL_HOURS=0 → always due"
           else:
-              THRESHOLD_SEC = INTERVAL_HOURS * 3600 - TOLERANCE_SEC
+              THRESHOLD_SEC = INTERVAL_SEC - TOLERANCE_SEC
+              cond1_due = True  # 缺文件/读不出默认 due
+              cond1_reason = "douyin.json does not exist"
 
-              if not os.path.exists(PATH):
-                  due = True
-                  reason = "douyin.json does not exist"
-              else:
+              if os.path.exists(PATH):
                   data = None
                   try:
                       with open(PATH, "r", encoding="utf-8") as f:
@@ -82,25 +86,59 @@ jobs:
                   except (json.JSONDecodeError, OSError) as e:
                       print(f"WARN: cannot read douyin.json ({e}); forcing douyin run to recover",
                             file=sys.stderr)
-                      due = True
-                      reason = f"douyin.json unreadable: {e}"
+                      cond1_reason = f"douyin.json unreadable: {e}"
 
                   if data is not None:
                       if not isinstance(data, list) or not data:
-                          due = True
-                          reason = "douyin.json is empty or not a list"
+                          cond1_reason = "douyin.json is empty or not a list"
                       else:
                           latest_ts = max(
                               (r.get("ts", 0) for r in data if isinstance(r, dict)),
                               default=0,
                           )
                           age = now - latest_ts
-                          due = age >= THRESHOLD_SEC
-                          reason = (
+                          cond1_due = age >= THRESHOLD_SEC
+                          cond1_reason = (
                               f"latest ts age = {age}s ({age/3600:.2f}h), "
                               f"threshold = {INTERVAL_HOURS}h "
                               f"({THRESHOLD_SEC}s, 留 5min 容差)"
                           )
+
+          # ----- Condition 2: 墙钟调度到达（与 douyin.json 无关）------ #
+          # 以 unix epoch 为锚，把时间按 DOUYIN_INTERVAL_HOURS 等分得到一串调度点
+          # （4h → :00/:04/:08/... UTC）。FORCE=true 触发后最近一条记录即使很新，
+          # 也不会把下一次"到期时间"往后推——只要墙钟已经进入下一个调度点的 5min
+          # 容差窗，就算 due。容差方向跟 cond1 一致（允许提前 5min 触发）。
+          #
+          # 短路：cond1 已经命中就直接跳掉 cond2，不再算下一次墙钟。
+          cond2_due = False
+          cond2_reason = ""
+          if cond1_due:
+              cond2_reason = "skipped (cond1 already due)"
+          elif INTERVAL_HOURS > 0:
+              next_boundary = ((now // INTERVAL_SEC) + 1) * INTERVAL_SEC
+              seconds_to_boundary = next_boundary - now
+              cond2_due = seconds_to_boundary <= TOLERANCE_SEC
+              cond2_reason = (
+                  f"next scheduled boundary in {seconds_to_boundary}s "
+                  f"(≤ {TOLERANCE_SEC}s tolerance)"
+              )
+          else:
+              cond2_reason = "INTERVAL_HOURS=0 → condition 2 disabled (cond1 already always due)"
+
+          # ----- Final: 任一条件成立即为 due ----------------------------- #
+          due = cond1_due or cond2_due
+          if cond1_due and cond2_due:
+              reason = f"cond1 AND cond2 both due | cond1: {cond1_reason} | cond2: {cond2_reason}"
+          elif cond1_due:
+              reason = f"cond1: {cond1_reason}"
+          elif cond2_due:
+              reason = f"cond2: {cond2_reason}"
+          else:
+              reason = (
+                  f"cond1: not due ({cond1_reason}); "
+                  f"cond2: not due ({cond2_reason})"
+              )
 
           due_str = "true" if due else "false"
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
