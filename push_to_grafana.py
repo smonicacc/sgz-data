@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Push metrics to Grafana Cloud Prometheus via Remote Write.
 
-Generic entry point supporting three subcommands, one per data domain:
+Generic entry point supporting four subcommands, one per data domain:
 
   qq-video      data.json style {ts, value}  → qq_video_subscribe
   douyin-user   douyin.json style {ts, sgz_*, *_tag_*}
   douyin-posts  user_posts[.history].json
+  xhs-topic     xhs_topic.json style {ts, *_tag_view_num}
 
 Each subcommand supports both single-timestamp and multi-timestamp modes
 (see --help for the exact flags).
@@ -69,6 +70,17 @@ DOUYIN_POSTS_STATS_FIELDS: tuple[str, ...] = (
 DOUYIN_POSTS_HISTORY_STATS_FIELDS: tuple[str, ...] = (
     "digg_count", "comment_count", "share_count",
 )
+
+# xhs_topic.json record shape:
+#   {"ts": <int>,
+#    "sgz_tag_view_num": <int>,
+#    "yqmr_tag_view_num": <int>,
+#    "fyzs_tag_view_num": <int>}
+# All three topics share the same metric, distinguished by a `tag` label.
+XHS_TOPIC_SUFFIX_MAP: list[tuple[str, str, str]] = [
+    ("_tag_view_num", "xhs_topic_view_count", "tag"),
+]
+XHS_TOPIC_DEFAULT_LABELS: dict[str, str] = {"job": "xhs_collector"}
 
 
 # --------------------------------------------------------------------------- #
@@ -386,6 +398,17 @@ def _build_parser() -> argparse.ArgumentParser:
                               "每个 (aweme_id, snapshot) 都推一次")
     _add_global_flags(p_dp)
 
+    # ---- xhs-topic -------------------------------------------------------- #
+    p_xhs = sub.add_parser(
+        "xhs-topic",
+        help="xhs_topic.json 风格 record → xhs_topic_view_count{tag=…}",
+    )
+    p_xhs.add_argument("--record-file", type=str, required=True,
+                       help="JSON 文件：单条 record（配 --last 用）或 record 数组")
+    p_xhs.add_argument("--last", action="store_true",
+                       help="只取 record-file 数组的最后一条（单点模式）")
+    _add_global_flags(p_xhs)
+
     return p
 
 
@@ -516,6 +539,41 @@ def cmd_douyin_posts(args: argparse.Namespace) -> int:
     return _emit_or_send(metrics, args.dry_run, args.print_only)
 
 
+# ---- xhs-topic ------------------------------------------------------------ #
+
+def cmd_xhs_topic(args: argparse.Namespace) -> int:
+    data = _load_json(args.record_file)
+    if args.last:
+        if not isinstance(data, list) or not data:
+            print("xhs-topic --last expects a non-empty JSON array",
+                  file=sys.stderr)
+            return 2
+        records = [data[-1]]
+    else:
+        if isinstance(data, list):
+            records = data
+        elif isinstance(data, dict):
+            records = [data]
+        else:
+            print(f"xhs-topic --record-file expects JSON object or array, "
+                  f"got {type(data).__name__}", file=sys.stderr)
+            return 2
+
+    before = len(records)
+    records = _filter_by_age(records, "ts", args.max_age_days)
+    if args.max_age_days is not None and len(records) != before:
+        print(f"[xhs-topic] age filter kept {len(records)}/{before} records "
+              f"(cutoff: last {args.max_age_days} days)",
+              file=sys.stderr)
+
+    metrics = records_to_metrics(
+        records,
+        suffix_map=XHS_TOPIC_SUFFIX_MAP,
+        default_labels=XHS_TOPIC_DEFAULT_LABELS,
+    )
+    return _emit_or_send(metrics, args.dry_run, args.print_only)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -525,6 +583,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_douyin_user(args)
     if args.cmd == "douyin-posts":
         return cmd_douyin_posts(args)
+    if args.cmd == "xhs-topic":
+        return cmd_xhs_topic(args)
     parser.print_help()
     return 2
 

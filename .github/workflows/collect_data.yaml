@@ -1,4 +1,4 @@
-name: Collect video.qq + douyin data
+name: Collect video.qq + douyin + xiaohongshu data
 on:
   workflow_dispatch:
     inputs:
@@ -355,12 +355,30 @@ jobs:
           python3 -m pip install --quiet prometheus-remote-writer
           python3 push_to_grafana.py douyin-user --record-file douyin.json --last
 
+      - name: Fetch xiaohongshu topic view_num and append to xhs_topic.json
+        if: ${{ github.event.inputs.FORCE == 'true' || steps.douyin_check.outputs.due == 'true' }}
+        env:
+          XHS_COOKIE: ${{ secrets.XHS_COOKIE }}
+        run: |
+          python3 -m pip install --quiet "xhshow>=0.1.9"
+          python3 fetch_xhs_topic.py
+
+      - name: Push xiaohongshu topic view to Grafana Cloud Prometheus
+        if: ${{ github.event.inputs.FORCE == 'true' || steps.douyin_check.outputs.due == 'true' }}
+        env:
+          GRAFANA_REMOTE_WRITE_URL: ${{ secrets.GRAFANA_REMOTE_WRITE_URL }}
+          GRAFANA_USER: ${{ secrets.GRAFANA_USER }}
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+        run: |
+          python3 -m pip install --quiet prometheus-remote-writer
+          python3 push_to_grafana.py xhs-topic --record-file xhs_topic.json --last
+
       - name: Commit and push updated data
         if: github.event.inputs.DRY_RUN != 'true'
         run: |
           git config --global user.name "AutoCollector"
           git config --global user.email "auto@collector.local"
-          git add data.json data-raw.json douyin.json
+          git add data.json data-raw.json douyin.json xhs_topic.json
           if git diff --quiet --cached; then
             echo "No changes, skip commit"
           else
