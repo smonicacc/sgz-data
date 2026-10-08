@@ -54,10 +54,10 @@
 
 1. **距上次 fetch 已到 `DOUYIN_INTERVAL_HOURS`**（5 分钟容差）
    读 `douyin.json` 取最新 `ts`，`age = now - latest_ts`，当 `age ≥ interval - 5min` 即 due。文件缺失 / 不可读 / 不是 list 也直接走 due（异常路径）。
-2. **墙钟调度到达**
-   以 unix epoch 为锚，按 `DOUYIN_INTERVAL_HOURS` 等分调度点（4h → `00:00 / 04:00 / 08:00 ...` UTC），距离下一个调度点 `≤ 5min` 即 due。这一条**与 `douyin.json` 无关**——`FORCE=true` 触发后即使刚 fetch 过，墙钟到点仍然会再触发一次，避免节奏被手动操作带偏。
+2. **墙钟调度点已过（容差窗内）**
+   以 unix epoch 为锚，按 `DOUYIN_INTERVAL_HOURS` 等分调度点（4h → `00:00 / 04:00 / 08:00 ...` UTC）。这一条看的是"刚过上一个调度点多久"——`seconds_since_boundary ≤ 5min` 即 due。这一条**与 `douyin.json` 无关**——`FORCE=true` 触发后即使刚 fetch 过，墙钟到了下一个调度点仍然会再触发一次，避免节奏被手动操作带偏。
 
-> 容差方向两边都一致：允许 workflow 比预定时间**早 5min** 触发，吸收外部触发器的 drift。
+> 容差方向专门为**右漂**留缓冲：GitHub Actions cron / webhook 实际执行一般比整点晚 1-2 分钟，5min 容差就吃下这种 delay；提前 5min（早于调度点）不算 due，那边由 cond1 的浮动容差管。
 
 `reason` 输出会标明实际是哪一条 / 两条同时命中，例如 `cond2: next scheduled boundary in 180s (≤ 300s tolerance)`。
 

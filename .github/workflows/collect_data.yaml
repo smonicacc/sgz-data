@@ -104,11 +104,15 @@ jobs:
                               f"({THRESHOLD_SEC}s, 留 5min 容差)"
                           )
 
-          # ----- Condition 2: 墙钟调度到达（与 douyin.json 无关）------ #
+          # ----- Condition 2: 墙钟调度点已过 + 容差窗内（与 douyin.json 无关）----- #
           # 以 unix epoch 为锚，把时间按 DOUYIN_INTERVAL_HOURS 等分得到一串调度点
           # （4h → :00/:04/:08/... UTC）。FORCE=true 触发后最近一条记录即使很新，
-          # 也不会把下一次"到期时间"往后推——只要墙钟已经进入下一个调度点的 5min
-          # 容差窗，就算 due。容差方向跟 cond1 一致（允许提前 5min 触发）。
+          # 也不会把下一次"到期时间"往后推——只要墙钟已经"刚过"上一个调度点、
+          # 且还没漂出 5min 容差窗，就算 due。
+          #
+          # 这里专门看"过了多久"而不是"还有多久"：外部触发器（GitHub Actions
+          # cron / webhook）一般会晚 1-2 分钟才真正执行，这个 5min 容差就是给
+          # 这种右漂留的缓冲。
           #
           # 短路：cond1 已经命中就直接跳掉 cond2，不再算下一次墙钟。
           cond2_due = False
@@ -116,11 +120,11 @@ jobs:
           if cond1_due:
               cond2_reason = "skipped (cond1 already due)"
           elif INTERVAL_HOURS > 0:
-              next_boundary = ((now // INTERVAL_SEC) + 1) * INTERVAL_SEC
-              seconds_to_boundary = next_boundary - now
-              cond2_due = seconds_to_boundary <= TOLERANCE_SEC
+              current_boundary = (now // INTERVAL_SEC) * INTERVAL_SEC
+              seconds_since_boundary = now - current_boundary
+              cond2_due = seconds_since_boundary <= TOLERANCE_SEC
               cond2_reason = (
-                  f"next scheduled boundary in {seconds_to_boundary}s "
+                  f"seconds since last boundary = {seconds_since_boundary}s "
                   f"(≤ {TOLERANCE_SEC}s tolerance)"
               )
           else:
