@@ -60,6 +60,14 @@ new_record = {
     "value": int(os.environ["RECORD_VAL"]),
 }
 
+# Optional hot_num: only attached when RECORD_HOT_NUM is set to a non-empty
+# integer (collect_data.yaml emits empty string when COLLECT_HOT_NUM=false or
+# extraction failed). Existing records without hot_num stay as {ts, value};
+# consumers that don't know about hot_num are unaffected.
+_hot_num_env = os.environ.get("RECORD_HOT_NUM", "").strip()
+if _hot_num_env:
+    new_record["hot_num"] = int(_hot_num_env)
+
 # 1) 全量存档：append-only，永不降采样
 if Path(RAW_FILE).exists():
     with open(RAW_FILE, "r", encoding="utf-8") as f:
