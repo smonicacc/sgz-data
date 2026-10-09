@@ -18,6 +18,28 @@
 /* SVG 图标：紫色圆底 + 白色回旋箭头，提示点击 */
 .nav-emoji{display:inline-block;vertical-align:middle;margin-right:2px;}
 #chart{width:100%;height:930px;}
+/* 自定义 HTML 图例（top10 用）：ECharts 自带图例不支持横向多行，用 grid 4 列实现 */
+#top10Legend{margin-top:12px;padding:12px 20px;background:#f5f5fa;border:1px solid #c9c9d6;border-radius:6px;display:none;}
+/* font-family 与 ECharts textStyle 默认一致；font-size 用 16（比 ECharts 的 15 略大，
+   因为系统 sans-serif 在 macOS 上（San Francisco）比 PingFang/Microsoft YaHei 视觉更紧凑） */
+#top10Legend.show{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px 16px;align-items:start;font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei','微软雅黑',Arial,sans-serif;font-size:16px;}
+.legend-item{display:flex;align-items:flex-start;gap:8px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;outline:none;line-height:1.3;padding:8px 6px;border-radius:4px;font-size:16px;}
+/* 取消 hover / active / focus 的任何前景/背景变化，保持 legend item 视觉始终一致（仅 .unselected 控制灰显） */
+.legend-item:hover,.legend-item:active,.legend-item:focus,.legend-item:focus-visible{background:transparent;outline:none;}
+/* 图例 marker：贯穿线 + 中间圆点（与"抖音话题播放数" ECharts 默认 line legend 一致） */
+/* 用 currentColor 让 ::before/::after 继承 .marker 的 color，JS 只需 style="color:..." 即可 */
+.legend-item .marker{display:inline-block;width:20px;height:12px;margin-top:8px;position:relative;flex-shrink:0;color:#000;}
+.legend-item .marker::before{content:'';position:absolute;left:0;right:0;top:50%;height:0;border-top:2px solid currentColor;}
+.legend-item .marker::after{content:'';position:absolute;left:50%;top:50%;width:8px;height:8px;transform:translate(-50%,-50%);border-radius:50%;background:currentColor;}
+.legend-item .label{color:#333;word-break:break-all;}
+/* 未选中：文字 + marker 统一变 #aaa（与 ECharts legend 默认 unselected 一致），用 !important 覆盖 inline 的 seriesColor */
+.legend-item.unselected .label{color:#aaa;}
+.legend-item.unselected .marker{color:#aaa !important;}
+/* "全部" 特殊项：用方块 marker（无 line + dot）跟 series 区分开，active 时深色实心，否则灰色 */
+.legend-item-all .marker{width:12px;height:12px;margin-top:8px;border-radius:2px;background:#333;flex-shrink:0;}
+.legend-item-all .marker::before,.legend-item-all .marker::after{display:none;}
+.legend-item-all .label{font-weight:500;}
+.legend-item-all.unselected .marker{background:#aaa !important;}
 </style>
 </head>
 <body>
@@ -32,6 +54,9 @@
         <option value="view" selected>抖音话题播放数</option>
         <option value="user">抖音话题参与人数</option>
         <option value="sgz">尚公主抖音号</option>
+        <!-- <option value="top10">尚公主抖音-TOP10</option>
+        <option value="latest10">尚公主抖音-最新10</option> -->
+        <!-- <option value="xhs">小红书话题浏览数</option> -->
       </select>
     </div>
     <div class="toolbar-group">
@@ -49,12 +74,14 @@
   </div>
 </div>
 <div id="chart"></div>
+<div id="top10Legend"></div>
 <script>
 // ---- 状态 ----
 let currentRange = '3d';
-let currentMetric = 'view';  // 'view' = 播放数(view_count)，'user' = 参与人数(user_count)
+let currentMetric = 'view';  // 'view' = 抖音播放数(view_count)，'user' = 抖音参与人数(user_count)，'sgz' = 尚公主抖音号，'xhs' = 小红书话题浏览数(view_num)，'top10' = 抖音作品-点赞TOP10，'latest10' = 抖音作品-最新10
 let refreshTimer = null;
 let allData = [];
+let top10Data = {};  // {aweme_id: [{ts, digg_count, ...}, ...]} top10 / latest10 共用
 let currentFiltered = [];
 let currentRangeObj = null;
 
@@ -72,8 +99,85 @@ const SERIES_BASE = [
     userColor: '#2563EB', userBarColor: '#93C5FD' },
 ];
 
-// 按当前指标算出 SERIES：view → view_count（原色），user → user_count（更鲜艳）
+// ---- TOP10 配置：10 个作品 + 10 个高对比度色（白底明显）----
+const TOP10_ITEMS = [
+  { awemeId: '7675574770423050953', name: '七夕live图可爱*2' },
+  { awemeId: '7544398141043477769', name: '0831开机风满楼大片' },
+  { awemeId: '7621751828358880622', name: '250万预约天下第一好小墨镜双人照' },
+  { awemeId: '7591450498210419633', name: '喵喵' },
+  { awemeId: '7518353962039561532', name: '0622官宣' },
+  { awemeId: '7675334230276399793', name: '七夕看那边' },
+  { awemeId: '7602668375747214153', name: '200万预约大婚' },
+  { awemeId: '7565794188832132362', name: '2025卖菜大会曳影夜话版预告' },
+  { awemeId: '7566890534225890619', name: '100万预约kiss' },
+  { awemeId: '7544404502763326746', name: '0831开机单人照' },
+];
+
+// ---- LATEST10 配置：10 个最新作品（与 TOP10 同样的 {awemeId, name} 形状，具体值后续用户给）----
+const LATEST10_ITEMS = [
+  { awemeId: '7691621444607151858', name: '400万预约别看书了看我视频' },
+  { awemeId: '7691620288476003977', name: '400万预约画眉双人海报' },
+  { awemeId: '7688680481227415153', name: '2026中秋逛街视频' },
+  { awemeId: '7679749658596453041', name: '开机一周年花絮' },
+  { awemeId: '7679748241172491441', name: '开机一周年合照' },
+  { awemeId: '7675574770423050953', name: '七夕live图可爱*2' },
+  { awemeId: '7675334230276399793', name: '七夕看那边' },
+  { awemeId: '7667569259942066810', name: '350万预约风景照' },
+  { awemeId: '7654929218279753403', name: '2026卖菜大会生死相依版预告' },
+  { awemeId: '7654566876714294267', name: '跑男拍立得' },
+];
+
+// Tailwind 600/700 系列饱和色，10 色在白底上相互区分度较好
+const TOP10_COLORS = [
+  '#DC2626',  // red
+  '#2563EB',  // blue
+  '#16A34A',  // green
+  '#9333EA',  // purple
+  '#EA580C',  // orange
+  '#0891B2',  // cyan
+  '#DB2777',  // pink
+  '#65A30D',  // lime
+  '#B45309',  // amber
+  '#475569',  // slate
+];
+
+// ---- 通用：按当前指标返回要展示的 10 个作品 + series 列表 ----
+// top10 / latest10 都用静态常量指定（具体值见 TOP10_ITEMS / LATEST10_ITEMS）
+function getCurrentItems() {
+  if (currentMetric === 'top10') return TOP10_ITEMS;
+  if (currentMetric === 'latest10') return LATEST10_ITEMS;
+  return [];
+}
+function getDisplaySeries() {
+  return getCurrentItems().map((item, i) => ({
+    name: item.name,
+    awemeId: item.awemeId,
+    color: TOP10_COLORS[i],
+  }));
+}
+// 当前指标的图表标题（renderTop10Chart 引用）
+function getSeriesChartTitle() {
+  if (currentMetric === 'top10') return '抖音作品-点赞TOP10';
+  if (currentMetric === 'latest10') return '抖音作品-最新10';
+  return '';
+}
+// 默认勾选：只勾选第 0 个（最近/最热门的那一个），其他全 false
+function getDefaultSelected() {
+  const result = {};
+  getCurrentItems().forEach((item, i) => { result[item.name] = i === 0; });
+  return result;
+}
+
+// 按当前指标算出 SERIES：view → view_count（原色），user → user_count（更鲜艳）；xhs → view_num（小红书字段无 douyin_ 中缀）
 function getSeries() {
+  if (currentMetric === 'xhs') {
+    return SERIES_BASE.map(s => ({
+      name: s.name,
+      field: `${s.prefix}_tag_view_num`,
+      color: s.viewColor,
+      barColor: s.viewBarColor,
+    }));
+  }
   const isUser = currentMetric === 'user';
   const suffix = isUser ? 'user_count' : 'view_count';
   return SERIES_BASE.map(s => ({
@@ -90,6 +194,12 @@ function getChartMeta() {
     return {
       lineTitle: '抖音话题参与人数',
       barTitle: '参与人数增量',
+    };
+  }
+  if (currentMetric === 'xhs') {
+    return {
+      lineTitle: '小红书话题浏览数',
+      barTitle: '浏览数增量',
     };
   }
   return {
@@ -436,6 +546,222 @@ function renderSgzChart(baseFiltered, range, selectedMap = {
   }, true);
 }
 
+// ---- 抖音作品-点赞TOP10 / 抖音作品-最新10 专用渲染：单 Y 轴折线图，10 条 series ----
+// 数据从 data/user_posts_history.json 取（{aweme_id: records[]} 结构），每条 series 读一个 aweme_id 的 digg_count
+// 复用 sgz 单图的网格布局（无柱状图，无双 Y 轴）；颜色按 TOP10_COLORS 数组分配
+// 指标差异由 getDisplaySeries()/getCurrentItems()/getSeriesChartTitle() 体现，渲染逻辑共享
+
+// ---- top10 自定义 HTML 图例（4 列 grid）----
+// ECharts 图例不支持横向 wrap 到多行，用 HTML 网格实现 3-4 列布局；
+// 点击 HTML item 通过 dispatchAction 触发 ECharts 内部状态切换，
+// ECharts 的 legendselectchanged 事件 → applyLegendFilter → 同步 HTML 视觉 + 重算 Y 轴
+function _escAttr(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function renderTop10Legend(selectedMap = {}) {
+  const container = document.getElementById('top10Legend');
+  if (!container) return;
+  const series = getDisplaySeries();
+  // "全部" 状态：10 条 series 全部勾选 → 显示为 active；否则按当前状态显示
+  const allOn = series.every(s => selectedMap[s.name] !== false);
+  const allItem = (
+    '<div class="legend-item legend-item-all' + (allOn ? '' : ' unselected') + '" onclick="toggleSelectAll()">' +
+    '<span class="marker"></span>' +
+    '<span class="label">全部</span>' +
+    '</div>'
+  );
+  const seriesItems = series.map(s => (
+    '<div class="legend-item" data-name="' + _escAttr(s.name) + '" onclick="toggleTop10Series(\'' + _escAttr(s.name) + '\')">' +
+    '<span class="marker" style="color:' + s.color + '"></span>' +
+    '<span class="label">' + _escAttr(s.name) + '</span>' +
+    '</div>'
+  )).join('');
+  container.innerHTML = allItem + seriesItems;
+  // 同步各 series 的 unselected 状态（"全部"项的 class 已在 allItem 里根据 allOn 处理）
+  syncTop10LegendHTML(selectedMap);
+  container.classList.add('show');
+}
+
+function hideTop10Legend() {
+  const container = document.getElementById('top10Legend');
+  if (container) container.classList.remove('show');
+}
+
+function syncTop10LegendHTML(selectedMap) {
+  const container = document.getElementById('top10Legend');
+  if (!container) return;
+  // "全部" 状态：所有 10 条都勾选 → active
+  const allOn = getCurrentItems().every(item => selectedMap[item.name] !== false);
+  const allEl = container.querySelector('.legend-item-all');
+  if (allEl) allEl.classList.toggle('unselected', !allOn);
+  // 各 series 状态
+  container.querySelectorAll('.legend-item:not(.legend-item-all)').forEach(el => {
+    el.classList.toggle('unselected', selectedMap[el.dataset.name] === false);
+  });
+}
+
+// HTML 图例点击 → 触发 ECharts 内部切换；legendselectchanged 事件会自动同步 HTML 状态 + 重算 Y 轴
+function toggleTop10Series(name) {
+  if (currentMetric !== 'top10' && currentMetric !== 'latest10') return;
+  subChart.dispatchAction({ type: 'legendToggleSelect', name });
+}
+
+// "全部" 切换：当前若不是 all-on → 全部勾选；若是 all-on → 恢复到默认（仅第 0 项勾选）
+function toggleSelectAll() {
+  if (currentMetric !== 'top10' && currentMetric !== 'latest10') return;
+  const items = getCurrentItems();
+  const allOn = items.every(item => lastSelected[item.name] !== false);
+  const newSelected = {};
+  if (allOn) {
+    // 全部已选 → 恢复默认（仅 index=0 勾选）
+    items.forEach((item, i) => { newSelected[item.name] = i === 0; });
+  } else {
+    // 不是全部选中 → 全部选中
+    items.forEach(item => { newSelected[item.name] = true; });
+  }
+  applyLegendFilter(newSelected);
+}
+
+function renderTop10Chart(range, selectedMap = {}) {
+  const allSeries = getDisplaySeries();
+  // 默认全选（selectedMap 未给某 series 时默认 true）
+  const isSelected = (name) => selectedMap[name] !== false;
+  // tooltip 用：seriesName → {awemeId, ...} 的查找表
+  const seriesByName = {};
+  allSeries.forEach(s => { seriesByName[s.name] = s; });
+
+  // 每条 series：按时间范围过滤 + 按 currentRange 分桶
+  const bucketed = allSeries.map(s => {
+    const records = top10Data[s.awemeId] || [];
+    // 时间过滤（与 applyRange 同样的半开区间逻辑）
+    let filtered = records.filter(r => {
+      const tsMs = r.ts * 1000;
+      if (tsMs < range.min) return false;
+      return range.maxInclusive === false
+        ? tsMs < range.max
+        : tsMs <= range.max;
+    });
+    // bucketize 函数对输入顺序无要求（按 ts 算桶），但 xMin/xMax 依赖 [0]/[length-1]，先升序排序保证两端是最早/最晚 ts
+    filtered.sort((a, b) => a.ts - b.ts);
+    if (currentRange === '3d') filtered = bucketizeHourClosest(filtered);
+    else if (currentRange === '7d') filtered = bucketizeFourHourClosest(filtered, 'closest');
+    else if (currentRange === '14d' || currentRange === 'all' || /^month:/.test(currentRange)) filtered = bucketizeDayClosest(filtered, 'closest');
+    return { ...s, data: filtered };
+  });
+
+  // 没有任何 series 有数据 → 空状态
+  if (bucketed.every(s => s.data.length === 0)) {
+    subChart.clear();
+    subChart.setOption({
+      title: { text: getSeriesChartTitle(), left: 'center', subtext: '该时间范围内无数据' },
+    });
+    lastSeriesBuckets = bucketed;
+    lastSelected = selectedMap;
+    return;
+  }
+
+  // X 轴范围：所有 series 的 [最早 ts, 最晚 ts] 并集
+  let xMin = Infinity, xMax = -Infinity;
+  for (const s of bucketed) {
+    if (!s.data.length) continue;
+    xMin = Math.min(xMin, s.data[0].ts * 1000);
+    xMax = Math.max(xMax, s.data[s.data.length - 1].ts * 1000);
+  }
+
+  // Y 轴范围按当前选中的 series 算（legend 切换自适应）
+  const visible = bucketed.filter(s => isSelected(s.name));
+  const yRange = computeYRange(
+    visible.map(s => ({ data: s.data.map(r => [r.ts * 1000, r.digg_count]) }))
+  );
+
+  const xLabelFormatter = (val) => {
+    const d = new Date(val);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+  const xTickFilter = (val) => {
+    if (currentRange !== '7d') return xLabelFormatter(val);
+    const d = new Date(val);
+    if (d.getHours() !== 0) return '';
+    return xLabelFormatter(val);
+  };
+
+  subChart.clear();
+  subChart.setOption({
+    animation: false,
+    title: { text: getSeriesChartTitle(), left: 'center', top: 5 },
+    legend: {
+      // ECharts 自带图例不支持横向多行 wrap；图例改用下方 #top10Legend 的 HTML grid（4 列）渲染，
+      // 这里只保留内部状态供 legendToggleSelect 等 action 使用，UI 隐藏。
+      show: false,
+      selected: selectedMap,
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', label: { backgroundColor: '#555' } },
+      valueFormatter: v => v == null ? '-' : v.toLocaleString('en-US'),
+      formatter: (params) => {
+        if (!params || !params.length) return '';
+        const ts = params[0].axisValue;
+        const dateStr = xLabelFormatter(ts);
+        let html = `${dateStr}<br/>`;
+        params.forEach(p => {
+          const val = p.value == null ? '-' :
+            Array.isArray(p.value) ? p.value[1].toLocaleString('en-US') :
+            p.value.toLocaleString('en-US');
+          // seriesName 形如 "TOP1"：tooltip 额外显示完整 aweme_id 便于定位
+          const s = seriesByName[p.seriesName];
+          const idTail = s ? ` (${s.awemeId})` : '';
+          html += `${p.marker} ${p.seriesName}${idTail}: ${val}<br/>`;
+        });
+        return html;
+      },
+    },
+    grid: { left: 70, right: 70, top: 50, height: 540 },
+    xAxis: {
+      type: 'time',
+      min: Math.max(range.min, xMin),
+      max: Math.min(range.max, xMax),
+      axisLabel: { rotate: 30, hideOverlap: true, formatter: xTickFilter },
+      axisLine: { show: true, lineStyle: { color: '#555' } },
+    },
+    yAxis: {
+      type: 'value',
+      name: '点赞数',
+      min: yRange ? yRange.min : 0,
+      max: yRange ? yRange.max : 1,
+      interval: yRange ? yRange.step : undefined,
+      splitNumber: 8,
+      nameTextStyle: { color: '#888', fontSize: 12 },
+      axisLine: { show: true, lineStyle: { color: '#555' } },
+      axisLabel: {
+        formatter: v => {
+          const u = yRange ? yRange.unit : { divisor: 1, unit: '' };
+          return (v / u.divisor).toFixed(3) + u.unit;
+        },
+      },
+    },
+    series: bucketed.map(s => ({
+      name: s.name,
+      type: 'line',
+      data: s.data.map(r => [r.ts * 1000, r.digg_count]),
+      smooth: false,
+      symbol: 'circle',
+      symbolSize: 4,
+      lineStyle: { width: 2, color: s.color },
+      itemStyle: { color: s.color },
+      emphasis: { focus: 'none' },
+    })),
+  }, true);
+
+  // 缓存给 legend 切换使用
+  lastSeriesBuckets = bucketed;
+  lastSelected = selectedMap;
+}
+
 // ---- 折线 + 柱状图渲染（同一 chart，两个 grid）----
 function renderChart(baseFiltered, range, selectedMap = {
   '#昀牵孟绕': true,
@@ -753,11 +1079,41 @@ let lastSeriesData = [];
 let lastBarSeriesData = [];
 // sgz 图表的 legend 选中状态（独立于 view/user 的 selectedMap）
 let lastSgzSelected = { '总获赞': true, '粉丝数': true };
+// top10 / latest10 图表的缓存：分桶后的系列数据 + legend 选中状态
+// 初始默认：只勾选当前 items[0]，其他全 false（top10 初始化时只有 TOP10_ITEMS，latest10 在 loadData 里重置）
+let lastSeriesBuckets = [];
+let lastSelected = getDefaultSelected();
 
 // 这样 ECharts 的 group 布局就不会把它算进去，可见 bar 能真正拿到 80% 槽宽
 // 直接重画整个图（notMerge: true），强制 ECharts 重新算布局
 function applyLegendFilter(selectedMap) {
-  if (currentMetric === 'sgz') {
+  if (currentMetric === 'top10' || currentMetric === 'latest10') {
+    // top10 / latest10：chart.series 永远包含全部 10 条（不让 ECharts 把 legend item 当孤儿处理掉），
+    // legend 可见性由 legend.selected 控制，这里只重算 Y 轴范围 + 更新 legend.selected。
+    // 不重画整个 chart，避免 ECharts 重新构造 legend 时把当前 unselected 的 item 移除。
+    lastSelected = selectedMap;
+    const isSelected = (name) => selectedMap[name] !== false;
+    const visible = lastSeriesBuckets.filter(s => isSelected(s.name));
+    const yRange = computeYRange(
+      visible.map(s => ({ data: s.data.map(r => [r.ts * 1000, r.digg_count]) }))
+    );
+    // 同步 HTML 图例视觉：被取消勾选的 item 加 .unselected（文字+marker 变 #aaa）
+    syncTop10LegendHTML(selectedMap);
+    subChart.setOption({
+      legend: { selected: selectedMap },
+      yAxis: {
+        min: yRange ? yRange.min : 0,
+        max: yRange ? yRange.max : 1,
+        interval: yRange ? yRange.step : undefined,
+        axisLabel: {
+          formatter: v => {
+            const u = yRange ? yRange.unit : { divisor: 1, unit: '' };
+            return (v / u.divisor).toFixed(3) + u.unit;
+          },
+        },
+      },
+    });
+  } else if (currentMetric === 'sgz') {
     // sgz 用 ECharts 默认的 legend 行为（点 legend 自动隐藏 series），不动整图。
     // 只用局部 setOption 把对应 Y 轴隐藏，并显式带上 splitNumber + splitLine.lineStyle，
     // 避免 splitLine 配置在切换时被覆盖
@@ -807,10 +1163,18 @@ function applyRange() {
     chartDom.style.height = '560px';
     subChart.resize();
     renderSgzChart(currentFiltered, currentRangeObj, lastSgzSelected);
+    hideTop10Legend();
+  } else if (currentMetric === 'top10' || currentMetric === 'latest10') {
+    // top10 / latest10 单图：图例改用下方 HTML grid 多行布局，chart 容器只需装下图表本身
+    chartDom.style.height = '700px';
+    subChart.resize();
+    renderTop10Chart(currentRangeObj, lastSelected);
+    renderTop10Legend(lastSelected);
   } else {
     chartDom.style.height = '930px';
     subChart.resize();
     renderChart(currentFiltered, currentRangeObj);
+    hideTop10Legend();
   }
 }
 
@@ -833,8 +1197,22 @@ function stopAutoRefresh() {
 
 // ---- 数据加载 ----
 async function loadData() {
-  const res = await fetch('./douyin.json?t=' + Date.now());
-  allData = await res.json();
+  if (currentMetric === 'top10' || currentMetric === 'latest10') {
+    // top10 / latest10 共用数据源：{aweme_id: records[]}，加载到 top10Data（不写入 allData）
+    const res = await fetch('./data/user_posts_history.json?t=' + Date.now());
+    top10Data = await res.json();
+    // 如果 lastSelected 跟当前 items 对不上（首次进入 / 切换指标），重置为默认
+    const items = getCurrentItems();
+    const needReset = items.length === 0 || items.some(it => !(it.name in lastSelected));
+    if (needReset) {
+      lastSelected = getDefaultSelected();
+    }
+  } else {
+    // xhs 指标走单独的 xhs_topic.json（字段名 {prefix}_tag_view_num，无 douyin_ 中缀）
+    const file = currentMetric === 'xhs' ? './xhs_topic.json' : './douyin.json';
+    const res = await fetch(file + '?t=' + Date.now());
+    allData = await res.json();
+  }
   applyRange();
 }
 
@@ -842,7 +1220,8 @@ async function loadData() {
 const chartSelect = document.getElementById('chartSelect');
 chartSelect.addEventListener('change', () => {
   currentMetric = chartSelect.value;
-  applyRange();
+  // 切换指标时数据源可能变（xhs 走 xhs_topic.json，其他走 douyin.json），重新加载
+  loadData();
 });
 
 rangeSelect.addEventListener('change', () => {
