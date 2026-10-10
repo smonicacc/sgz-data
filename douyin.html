@@ -136,19 +136,60 @@ const LATEST10_ITEMS = [
   { awemeId: '7654566876714294267', name: '跑男拍立得' },
 ];
 
-// Tailwind 600/700 系列饱和色，10 色在白底上相互区分度较好
+// 保底调色板：跟 TOP10_COLORS_BY_AWEME 全部 18 色都不重（hash 散到的色不会跟已有 id 撞色）
+// 取 Tailwind 700/800/900 系列更深一档的色（BY_AWEME 用 600/700，这里用 700/800/900）
 const TOP10_COLORS = [
-  '#DC2626',  // red
-  '#2563EB',  // blue
-  '#16A34A',  // green
-  '#9333EA',  // purple
-  '#EA580C',  // orange
-  '#0891B2',  // cyan
-  '#DB2777',  // pink
-  '#65A30D',  // lime
-  '#B45309',  // amber
-  '#475569',  // slate
+  '#0369A1',  // sky
+  '#1E40AF',  // dark blue
+  '#166534',  // dark green
+  '#4338CA',  // dark indigo
+  '#92400E',  // dark amber
+  '#155E75',  // dark cyan
+  '#9D174D',  // dark rose
+  '#3F6212',  // dark lime
+  '#854D0E',  // dark yellow
+  '#5B21B6',  // dark violet
 ];
+
+// TOP10/LATEST10 共享的全局 aweme_id → 颜色 映射（同一 id 在两个视图里同色）
+// 显式列出全部 18 个 id；未列入的 id 用 hash 散到 TOP10_COLORS 上（保底）
+const TOP10_COLORS_BY_AWEME = {
+  // TOP10 的 10 个（Tailwind 600/700 亮色系，跟 TOP10_COLORS 保底调色板的 700/800/900 深色系不重）
+  '7675574770423050953': '#DC2626',  // red，TOP10[0]，也是 LATEST10[5]
+  '7544398141043477769': '#16A34A',  // green，TOP10[1]
+  '7621751828358880622': '#9333EA',  // purple，TOP10[2]
+  '7591450498210419633': '#2563EB',  // blue，TOP10[3]
+  '7518353962039561532': '#EA580C',  // orange，TOP10[4]
+  '7675334230276399793': '#0891B2',  // cyan，TOP10[5]，也是 LATEST10[6]
+  '7602668375747214153': '#DB2777',  // pink，TOP10[6]
+  '7565794188832132362': '#65A30D',  // lime，TOP10[7]
+  '7566890534225890619': '#B45309',  // amber，TOP10[8]
+  '7544404502763326746': '#475569',  // slate，TOP10[9]
+  '7691621444607151858': '#CA8A04',  // yellow，LATEST10[0]
+  '7691620288476003977': '#0D9488',  // teal，LATEST10[1]
+  '7688680481227415153': '#4F46E5',  // indigo，LATEST10[2]
+  '7679749658596453041': '#BE185D',  // rose，LATEST10[3]
+  '7679748241172491441': '#A21CAF',  // fuchsia，LATEST10[4]
+  '7667569259942066810': '#6D28D9',  // violet，LATEST10[7]
+  '7654929218279753403': '#047857',  // emerald，LATEST10[8]
+  '7654566876714294267': '#831843',  // dark pink，LATEST10[9]
+};
+
+// djb2 字符串 hash，让未列入的 aweme_id 也保持稳定颜色（同一 id → 同一色）
+function _hashAwemeId(id) {
+  let h = 5381;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) + h) + id.charCodeAt(i);  // h * 33 + c
+    h |= 0;
+  }
+  return Math.abs(h);
+}
+
+// 查表：显式映射优先，未列入则 hash 散到 TOP10_COLORS 上（保底）
+function getColorByAweme(awemeId) {
+  if (TOP10_COLORS_BY_AWEME[awemeId]) return TOP10_COLORS_BY_AWEME[awemeId];
+  return TOP10_COLORS[_hashAwemeId(awemeId) % TOP10_COLORS.length];
+}
 
 // ---- 通用：按当前指标返回要展示的 10 个作品 + series 列表 ----
 // top10 / latest10 都用静态常量指定（具体值见 TOP10_ITEMS / LATEST10_ITEMS）
@@ -158,10 +199,10 @@ function getCurrentItems() {
   return [];
 }
 function getDisplaySeries() {
-  return getCurrentItems().map((item, i) => ({
+  return getCurrentItems().map((item) => ({
     name: item.name,
     awemeId: item.awemeId,
-    color: TOP10_COLORS[i],
+    color: getColorByAweme(item.awemeId),
   }));
 }
 // 当前指标的图表标题（renderTop10Chart 引用）
