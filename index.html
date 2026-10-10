@@ -207,6 +207,8 @@ function renderChart(filtered, range) {
       symbolSize: 3,
       data: downsampleForChart(filtered, range).map(item => [item.ts * 1000, item.value]),
       smooth: true,
+      lineStyle: { color: '#8361B2', width: 2 },
+      itemStyle: { color: '#8361B2' },
     }],
   }, true);  // true = 不合并，完全替换
 }
@@ -340,7 +342,7 @@ function renderBarChart(filtered, range) {
       type: 'bar',
       data: deltas.map(d => [d.ts * 1000, d.delta]),
       // ≤7 天：常规蓝；>7 天：浅蓝（每天一根，密度低，颜色淡一点降低视觉重量）
-      itemStyle: { color: spanDays <= 7 ? '#5470c6' : '#8aa0c8' },
+      itemStyle: { color: spanDays <= 7 ? '#9980B8' : '#BFA8DC' },
       barWidth: '80%',
     }],
   }, true);
@@ -565,7 +567,7 @@ function renderTable(filtered, range) {
     //   - +0 → 不加粗、不变蓝
     //   - 普通行 → 默认颜色（不加粗、不变蓝）
     const dayCumCell = (isDayFirst && dayCum !== '-' && dayCum !== '+0')
-      ? `<b style="color:#1976d2">${dayCum}</b>`
+      ? `<b style="color:#72509D;font-size:larger">${dayCum}</b>`
       : dayCum;
     return `<tr><td>${new Date(r.ts * 1000).toLocaleString()}</td><td>${(r.value / 10000).toFixed(4)}</td><td>${delta}</td><td>${perMin}</td><td>${dayCumCell}</td></tr>`;
   }).join('');

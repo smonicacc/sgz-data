@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """分层归档时间序列：
-  - data-raw.json：append-only，全量保留，不降采样
+  - data-raw.json：append-only，全量保留，不降采样；可选带 hot_num
   - data.json    ：
       <24h         全保留
       24h~3d       按小时桶，桶末
@@ -8,10 +8,12 @@
       >7d          按天桶，取 BJ 0:00 之后的第一条（前一天与当天分界）
 
   所有"天/小时"边界均按 UTC+8 计算（与 index.html 一致）
+  hot_num 仅写入 data-raw.json，不会进 data.json
 
 运行时通过环境变量接收本次采集参数：
-  RECORD_TS   - 本次记录时间戳（秒）
-  RECORD_VAL  - 本次记录数值
+  RECORD_TS      - 本次记录时间戳（秒）
+  RECORD_VAL     - 本次记录数值
+  RECORD_HOT_NUM - 可选；非空整数时附加 hot_num（仅 data-raw.json）
 """
 import json
 import os
@@ -60,6 +62,18 @@ new_record = {
     "value": int(os.environ["RECORD_VAL"]),
 }
 
+# Optional hot_num: only attached when RECORD_HOT_NUM is set to a non-empty
+# integer (collect_data.yaml emits empty string when COLLECT_HOT_NUM=false or
+# extraction failed). hot_num is appended to data-raw.json — never written to
+# data.json (downsampled view is the canonical "single value" plot).
+_hot_num_env = os.environ.get("RECORD_HOT_NUM", "").strip()
+if _hot_num_env:
+    new_record["hot_num"] = int(_hot_num_env)
+
+# ds_record (no hot_num) for data.json; raw_record (with hot_num) for data-raw.json
+ds_record = {"ts": new_record["ts"], "value": new_record["value"]}
+raw_record = new_record
+
 # 1) 全量存档：append-only，永不降采样
 if Path(RAW_FILE).exists():
     with open(RAW_FILE, "r", encoding="utf-8") as f:
@@ -70,7 +84,7 @@ elif Path(JSON_FILE).exists():
         raw_data = json.load(f)
 else:
     raw_data = []
-raw_data.append(new_record)
+raw_data.append(raw_record)
 with open(RAW_FILE, "w", encoding="utf-8") as f:
     json.dump(raw_data, f, ensure_ascii=False, indent=2)
 
@@ -80,7 +94,7 @@ if Path(JSON_FILE).exists():
         data = json.load(f)
 else:
     data = []
-data.append(new_record)
+data.append(ds_record)
 
 # 时间边界
 sec1d = 86400
@@ -125,5 +139,9 @@ for lst in day_groups.values():
     keep.append(bucket_pick(lst, 'first'))
 
 keep.sort(key=lambda x: x["ts"])
+# hot_num 仅属于全量存档（data-raw.json）；data.json 必须不带这个字段，
+# 否则下游会把它当作 metric 渲染。顺手清掉旧记录里残留的 hot_num。
+for r in keep:
+    r.pop("hot_num", None)
 with open(JSON_FILE, "w", encoding="utf-8") as f:
     json.dump(keep, f, ensure_ascii=False, indent=2)

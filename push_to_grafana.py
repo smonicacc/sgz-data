@@ -3,7 +3,9 @@
 
 Generic entry point supporting four subcommands, one per data domain:
 
-  qq-video      data.json style {ts, value}  → qq_video_subscribe
+  qq-video      data.json style {ts, value[, hot_num]}
+                value    → qq_video_subscribe
+                hot_num  → qq_video_hot_num (optional, only when COLLECT_HOT_NUM=true)
   douyin-user   douyin.json style {ts, sgz_*, *_tag_*}
   douyin-posts  user_posts[.history].json
   xhs-topic     xhs_topic.json style {ts, *_tag_view_num}
@@ -34,9 +36,15 @@ from prometheus_remote_writer import RemoteWriter
 # Built-in field/suffix maps and default labels per data domain.
 # --------------------------------------------------------------------------- #
 
-# data.json record shape: {"ts": <int>, "value": <int>}
+# data.json record shape: {"ts": <int>, "value": <int>, "hot_num"?: <int>}
+# `value` = attent_num (always present when produced by the workflow).
+# `hot_num` is optional — only present when COLLECT_HOT_NUM=true was set on
+# the workflow dispatch that captured the record. Either field maps to its
+# own metric; the absence of `hot_num` is silently skipped, so old records
+# (and old batches) still flow through unchanged.
 QQ_VIDEO_FIELD_MAP: dict[str, dict[str, Any]] = {
     "value": {"name": "qq_video_subscribe"},
+    "hot_num": {"name": "qq_video_hot_num"},
 }
 QQ_VIDEO_DEFAULT_LABELS: dict[str, str] = {"job": "qq_video_collector"}
 
@@ -364,13 +372,18 @@ def _build_parser() -> argparse.ArgumentParser:
     # ---- qq-video --------------------------------------------------------- #
     p_qq = sub.add_parser(
         "qq-video",
-        help="QQ 视频单点 → qq_video_subscribe；或 data.json 全量回填",
+        help="QQ 视频单点 → qq_video_subscribe（可选 --hot-num 顺带推 qq_video_hot_num）；"
+             "或 data.json 全量回填（自动按字段映射 value / hot_num）",
     )
     qq_mode = p_qq.add_mutually_exclusive_group(required=True)
     qq_mode.add_argument("--val", type=int,
-                         help="单点模式：直接推送一个整数")
+                         help="单点模式：直接推送一个整数（→ qq_video_subscribe）")
     qq_mode.add_argument("--records-file", type=str,
-                         help="多点模式：读 JSON 数组，每条 {ts, value} 都推一次")
+                         help="多点模式：读 JSON 数组，每条 {ts, value[, hot_num]} 自动按字段映射")
+    p_qq.add_argument(
+        "--hot-num", type=int, default=None,
+        help="（仅与 --val 同用）顺带推送 hot_num 单点 → qq_video_hot_num",
+    )
     _add_global_flags(p_qq)
 
     # ---- douyin-user ------------------------------------------------------ #
@@ -423,6 +436,15 @@ def cmd_qq_video(args: argparse.Namespace) -> int:
             "value": args.val,
             "timestamp_ms": ts_ms,
         }]
+        # Optional companion: --hot-num lets the workflow dispatcher push both
+        # metrics in a single invocation when COLLECT_HOT_NUM=true produced it.
+        if getattr(args, "hot_num", None) is not None:
+            metrics.append({
+                "name": "qq_video_hot_num",
+                "labels": dict(QQ_VIDEO_DEFAULT_LABELS),
+                "value": args.hot_num,
+                "timestamp_ms": ts_ms,
+            })
         return _emit_or_send(metrics, args.dry_run, args.print_only)
 
     # --records-file

@@ -54,9 +54,9 @@
         <option value="view" selected>抖音话题播放数</option>
         <option value="user">抖音话题参与人数</option>
         <option value="sgz">尚公主抖音号</option>
-        <!-- <option value="top10">尚公主抖音-TOP10</option>
-        <option value="latest10">尚公主抖音-最新10</option> -->
-        <!-- <option value="xhs">小红书话题浏览数</option> -->
+        <option value="top10">尚公主抖音-TOP10</option>
+        <option value="latest10">尚公主抖音-最新10</option>
+        <option value="xhs">小红书话题浏览数</option>
       </select>
     </div>
     <div class="toolbar-group">
@@ -85,8 +85,11 @@ let top10Data = {};  // {aweme_id: [{ts, digg_count, ...}, ...]} top10 / latest1
 let currentFiltered = [];
 let currentRangeObj = null;
 
-// ---- 系列基础配置：3 条话题，前缀决定字段名 ----
-// 播放数用原色（紫/红/蓝），参与人数用更鲜艳的色以在白底区分
+// ---- 系列基础配置：5 条话题，前缀决定字段名 ----
+// 播放数用原色，参与人数用更鲜艳的色以在白底区分
+// 前缀对应 data/douyin.json 里的 {prefix}_douyin_tag_{view_count|user_count} 字段名
+//   yqmr → #昀牵孟绕；sgz → #尚公主；fyzs → #扶摇直尚
+//   mzylyr → #孟子义李昀锐；lyrmzy → #李昀锐孟子义
 const SERIES_BASE = [
   { name: '#昀牵孟绕', prefix: 'yqmr',
     viewColor: '#7D4698', viewBarColor: '#B197C4',
@@ -97,6 +100,12 @@ const SERIES_BASE = [
   { name: '#扶摇直尚', prefix: 'fyzs',
     viewColor: '#5794F2', viewBarColor: '#A8C5FA',
     userColor: '#2563EB', userBarColor: '#93C5FD' },
+  { name: '#孟子义李昀锐', prefix: 'mzylyr',
+    viewColor: '#16A34A', viewBarColor: '#86EFAC',
+    userColor: '#059669', userBarColor: '#6EE7B7' },
+  { name: '#李昀锐孟子义', prefix: 'lyrmzy',
+    viewColor: '#EE2E84', viewBarColor: '#FECDD3',  // Tailwind rose-600 / rose-200（rose 比 pink 红更多/紫更少，更"粉"）
+    userColor: '#DB2777', userBarColor: '#F472B6' }, // Tailwind pink-600 / pink-400
 ];
 
 // ---- TOP10 配置：10 个作品 + 10 个高对比度色（白底明显）----
@@ -127,19 +136,60 @@ const LATEST10_ITEMS = [
   { awemeId: '7654566876714294267', name: '跑男拍立得' },
 ];
 
-// Tailwind 600/700 系列饱和色，10 色在白底上相互区分度较好
+// 保底调色板：跟 TOP10_COLORS_BY_AWEME 全部 18 色都不重（hash 散到的色不会跟已有 id 撞色）
+// 取 Tailwind 700/800/900 系列更深一档的色（BY_AWEME 用 600/700，这里用 700/800/900）
 const TOP10_COLORS = [
-  '#DC2626',  // red
-  '#2563EB',  // blue
-  '#16A34A',  // green
-  '#9333EA',  // purple
-  '#EA580C',  // orange
-  '#0891B2',  // cyan
-  '#DB2777',  // pink
-  '#65A30D',  // lime
-  '#B45309',  // amber
-  '#475569',  // slate
+  '#0369A1',  // sky
+  '#1E40AF',  // dark blue
+  '#166534',  // dark green
+  '#4338CA',  // dark indigo
+  '#92400E',  // dark amber
+  '#155E75',  // dark cyan
+  '#9D174D',  // dark rose
+  '#3F6212',  // dark lime
+  '#854D0E',  // dark yellow
+  '#5B21B6',  // dark violet
 ];
+
+// TOP10/LATEST10 共享的全局 aweme_id → 颜色 映射（同一 id 在两个视图里同色）
+// 显式列出全部 18 个 id；未列入的 id 用 hash 散到 TOP10_COLORS 上（保底）
+const TOP10_COLORS_BY_AWEME = {
+  // TOP10 的 10 个（Tailwind 600/700 亮色系，跟 TOP10_COLORS 保底调色板的 700/800/900 深色系不重）
+  '7675574770423050953': '#DC2626',  // red，TOP10[0]，也是 LATEST10[5]
+  '7544398141043477769': '#16A34A',  // green，TOP10[1]
+  '7621751828358880622': '#9333EA',  // purple，TOP10[2]
+  '7591450498210419633': '#2563EB',  // blue，TOP10[3]
+  '7518353962039561532': '#EA580C',  // orange，TOP10[4]
+  '7675334230276399793': '#0891B2',  // cyan，TOP10[5]，也是 LATEST10[6]
+  '7602668375747214153': '#DB2777',  // pink，TOP10[6]
+  '7565794188832132362': '#65A30D',  // lime，TOP10[7]
+  '7566890534225890619': '#B45309',  // amber，TOP10[8]
+  '7544404502763326746': '#475569',  // slate，TOP10[9]
+  '7691621444607151858': '#CA8A04',  // yellow，LATEST10[0]
+  '7691620288476003977': '#0D9488',  // teal，LATEST10[1]
+  '7688680481227415153': '#4F46E5',  // indigo，LATEST10[2]
+  '7679749658596453041': '#BE185D',  // rose，LATEST10[3]
+  '7679748241172491441': '#A21CAF',  // fuchsia，LATEST10[4]
+  '7667569259942066810': '#6D28D9',  // violet，LATEST10[7]
+  '7654929218279753403': '#047857',  // emerald，LATEST10[8]
+  '7654566876714294267': '#831843',  // dark pink，LATEST10[9]
+};
+
+// djb2 字符串 hash，让未列入的 aweme_id 也保持稳定颜色（同一 id → 同一色）
+function _hashAwemeId(id) {
+  let h = 5381;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) + h) + id.charCodeAt(i);  // h * 33 + c
+    h |= 0;
+  }
+  return Math.abs(h);
+}
+
+// 查表：显式映射优先，未列入则 hash 散到 TOP10_COLORS 上（保底）
+function getColorByAweme(awemeId) {
+  if (TOP10_COLORS_BY_AWEME[awemeId]) return TOP10_COLORS_BY_AWEME[awemeId];
+  return TOP10_COLORS[_hashAwemeId(awemeId) % TOP10_COLORS.length];
+}
 
 // ---- 通用：按当前指标返回要展示的 10 个作品 + series 列表 ----
 // top10 / latest10 都用静态常量指定（具体值见 TOP10_ITEMS / LATEST10_ITEMS）
@@ -149,10 +199,10 @@ function getCurrentItems() {
   return [];
 }
 function getDisplaySeries() {
-  return getCurrentItems().map((item, i) => ({
+  return getCurrentItems().map((item) => ({
     name: item.name,
     awemeId: item.awemeId,
-    color: TOP10_COLORS[i],
+    color: getColorByAweme(item.awemeId),
   }));
 }
 // 当前指标的图表标题（renderTop10Chart 引用）
@@ -712,10 +762,8 @@ function renderTop10Chart(range, selectedMap = {}) {
           const val = p.value == null ? '-' :
             Array.isArray(p.value) ? p.value[1].toLocaleString('en-US') :
             p.value.toLocaleString('en-US');
-          // seriesName 形如 "TOP1"：tooltip 额外显示完整 aweme_id 便于定位
-          const s = seriesByName[p.seriesName];
-          const idTail = s ? ` (${s.awemeId})` : '';
-          html += `${p.marker} ${p.seriesName}${idTail}: ${val}<br/>`;
+          // tooltip 只显示 series 名字 + 数值，不附加 awemeId（用户确认不需要）
+          html += `${p.marker} ${p.seriesName}: ${val}<br/>`;
         });
         return html;
       },
@@ -767,6 +815,8 @@ function renderChart(baseFiltered, range, selectedMap = {
   '#昀牵孟绕': true,
   '#尚公主': false,
   '#扶摇直尚': false,
+  '#孟子义李昀锐': false,
+  '#李昀锐孟子义': false,
 }) {
   if (!baseFiltered.length) {
     subChart.clear();
@@ -853,8 +903,9 @@ function renderChart(baseFiltered, range, selectedMap = {
   }));
   const barSeriesData = getSeries().map(s => {
     const field = s.field;
-    // 在 allData 里找"X+step 之后最近"的值。
-    // 如果 X+step 之后没有数据（最后一个桶还没跑完），fallback 到全数据最后一条 → 显示"截至当前"的增量
+    // 在 allData 里找"boundary 之后最近"的值。
+    // 如果 boundary 之后没有数据（最后一个桶还没跑完），fallback 到全数据最后一条 → 显示"截至当前"的增量
+    // 同时也支持 boundary 之前没数据的情况：返回第一个有该 field 的值（用于新加话题的稀疏数据）
     const findFirstAfter = (boundary) => {
       let lastVal = null;
       for (const r of allData) {
@@ -866,13 +917,15 @@ function renderChart(baseFiltered, range, selectedMap = {
       return lastVal;
     };
     // category 轴下 bar data 用纯 value（按索引对齐到 barXCategories），不再带 [ts, val] 对
+    // startVal 也用 findFirstAfter 而非 b[field]：
+    //   b 是桶里 ts 最小的那条，但那条可能不带本 field（新话题稀疏数据时常见），
+    //   改成"桶起点之后第一个有该 field 的值"才能算到正确的增量
     const deltas = barData.map(b => {
-      if (b[field] == null) return 0;
       const startBoundary = bucketBoundaryUtc(b.ts);
-      const startVal = b[field]; // first-after-startBoundary
+      const startVal = findFirstAfter(startBoundary);
       const endBoundary = startBoundary + bucketStepSec;
       const endVal = findFirstAfter(endBoundary);
-      if (endVal == null) return 0; // 该 field 完全没数据
+      if (startVal == null || endVal == null) return 0; // 该 field 完全没数据
       return endVal - startVal;
     });
     return { ...s, data: deltas };

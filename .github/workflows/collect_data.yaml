@@ -30,6 +30,14 @@ on:
         description: 抖音采集间隔（小时）。设为 0 表示始终 due，每次都跑
         required: true
         default: '4'
+      COLLECT_HOT_NUM:
+        description: 是否在同一次请求里顺带采集腾讯视频 hot_num（仅写入 data-raw.json，不进 data.json；不影响 attent_num）
+        type: choice
+        required: true
+        default: 'true'
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: write
@@ -202,8 +210,10 @@ jobs:
             exit 1
           fi
 
-      - name: Parse attent_num from response (Python)
+      - name: Parse attent_num + optional hot_num from response (Python)
         id: parse_val
+        env:
+          COLLECT_HOT_NUM: ${{ github.event.inputs.COLLECT_HOT_NUM }}
         run: |
           python3 - <<'PY'
           import json, os, sys, time
@@ -212,34 +222,68 @@ jobs:
               resp = json.load(f)
 
           cards = (((resp.get("data") or {}).get("CardList")) or [])
-          match = None
+
+          # ---- attent_num: always required ---- #
+          attent_match = None
           for card in cards:
               if card.get("type") == "pc_detail_attent_banner":
-                  match = card
+                  attent_match = card
                   break
 
-          if match is None:
+          if attent_match is None:
               print("ERROR: pc_detail_attent_banner not found. CardList types:", file=sys.stderr)
               print(json.dumps([c.get("type") for c in cards], ensure_ascii=False), file=sys.stderr)
               sys.exit(1)
 
           try:
-              val = match["children_list"]["0"]["cards"][0]["params"]["attent_num"]
+              attent_val = attent_match["children_list"]["0"]["cards"][0]["params"]["attent_num"]
           except (KeyError, TypeError) as e:
               print(f"ERROR: cannot extract attent_num: {e}", file=sys.stderr)
               print("CardList types:", json.dumps([c.get("type") for c in cards], ensure_ascii=False), file=sys.stderr)
               sys.exit(1)
 
-          if val is None:
+          if attent_val is None:
               print("ERROR: attent_num is null", file=sys.stderr)
               print("CardList types:", json.dumps([c.get("type") for c in cards], ensure_ascii=False), file=sys.stderr)
               sys.exit(1)
 
+          # ---- hot_num: optional, gated by COLLECT_HOT_NUM ---- #
+          # Same response, different card. Warn-but-skip when missing; do NOT
+          # fail the workflow — attent_num is the primary metric and must still flow.
+          hot_num_val = None
+          if os.environ.get("COLLECT_HOT_NUM", "false") == "true":
+              hot_match = next(
+                  (c for c in cards if isinstance(c, dict) and c.get("type") == "pc_introduction"),
+                  None,
+              )
+              if hot_match is None:
+                  print("WARN: COLLECT_HOT_NUM=true but no pc_introduction card in response",
+                        file=sys.stderr)
+              else:
+                  try:
+                      raw = hot_match["children_list"]["0"]["cards"][0]["params"]["hot_num"]
+                  except (KeyError, TypeError, IndexError) as e:
+                      print(f"WARN: cannot extract hot_num: {e}", file=sys.stderr)
+                  else:
+                      if raw is None:
+                          print("WARN: hot_num is null in pc_introduction card",
+                                file=sys.stderr)
+                      else:
+                          try:
+                              hot_num_val = int(raw)
+                          except (TypeError, ValueError) as e:
+                              print(f"WARN: hot_num is not an integer ({raw!r}): {e}",
+                                    file=sys.stderr)
+
           ts = int(time.time())
-          record = {"ts": ts, "value": val}
+          record = {"ts": ts, "value": attent_val}
+          if hot_num_val is not None:
+              record["hot_num"] = hot_num_val
+
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"ts={ts}\n")
-              fh.write(f"val={val}\n")
+              fh.write(f"val={attent_val}\n")
+              fh.write(f"hot_num={hot_num_val if hot_num_val is not None else ''}\n")
 
           print(f"record={json.dumps(record, ensure_ascii=False)}")
           PY
@@ -250,15 +294,24 @@ jobs:
           GRAFANA_USER: ${{ secrets.GRAFANA_USER }}
           GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
           VAL: ${{ steps.parse_val.outputs.val }}
+          HOT_NUM: ${{ steps.parse_val.outputs.hot_num }}
         run: |
           python3 -m pip install --quiet prometheus-remote-writer
-          python3 push_to_grafana.py qq-video --val "$VAL"
+          # Always push qq_video_subscribe (attent_num). When COLLECT_HOT_NUM
+          # was enabled and the parser extracted a hot_num, also push
+          # qq_video_hot_num — same timestamp, single HTTP call.
+          ARGS=(--val "$VAL")
+          if [[ -n "$HOT_NUM" ]]; then
+            ARGS+=(--hot-num "$HOT_NUM")
+          fi
+          python3 push_to_grafana.py qq-video "${ARGS[@]}"
 
       - name: Run Python downsample logic（核心分层归档）
         id: process_data
         env:
           RECORD_TS: ${{ steps.parse_val.outputs.ts }}
           RECORD_VAL: ${{ steps.parse_val.outputs.val }}
+          RECORD_HOT_NUM: ${{ steps.parse_val.outputs.hot_num }}
         run: python3 process.py
 
       - name: Fetch douyin user profile
@@ -310,18 +363,13 @@ jobs:
       - name: Append to douyin.json
         if: ${{ github.event.inputs.FORCE == 'true' || steps.douyin_check.outputs.due == 'true' }}
         run: |
+          # Build the new record inline (one per run, single ts), then hand off
+          # to downsample_douyin.py for the actual write. The script handles
+          # both appending to douyin-raw.json (full archive) and rewriting
+          # douyin.json (downsampled by BJ-time buckets).
           python3 - <<'PY'
           import glob, json, os, time
-          from pathlib import Path  # noqa: F401  (kept for future use)
-
-          path = "douyin.json"
-          if os.path.exists(path):
-              with open(path, "r", encoding="utf-8") as f:
-                  data = json.load(f)
-              if not isinstance(data, list):
-                  raise SystemExit(f"douyin.json exists but is not a list: {type(data).__name__}")
-          else:
-              data = []
+          from pathlib import Path
 
           # Parse sgz_follower_count / sgz_total_favorited from the user profile response.
           # See douyin.md: 粉丝数 → sgz_follower_count, 获赞总数 → sgz_total_favorited.
@@ -382,12 +430,11 @@ jobs:
               new_record[f"{prefix}_douyin_tag_view_count"] = tag_view_count
               new_record[f"{prefix}_douyin_tag_user_count"] = tag_user_count
 
-          print(f"appended={json.dumps(new_record, ensure_ascii=False)}")
-          data.append(new_record)
-
-          with open(path, "w", encoding="utf-8") as f:
-              json.dump(data, f, ensure_ascii=False, indent=2)
+          print(f"new_record={json.dumps(new_record, ensure_ascii=False)}")
+          with open("new_douyin_record.json", "w", encoding="utf-8") as f:
+              json.dump(new_record, f, ensure_ascii=False)
           PY
+          python3 downsample_douyin.py
 
       - name: Push douyin user profile to Grafana Cloud Prometheus
         if: ${{ github.event.inputs.FORCE == 'true' || steps.douyin_check.outputs.due == 'true' }}
@@ -422,7 +469,7 @@ jobs:
         run: |
           git config --global user.name "AutoCollector"
           git config --global user.email "auto@collector.local"
-          git add data.json data-raw.json douyin.json xhs_topic.json
+          git add data.json data-raw.json douyin.json douyin-raw.json xhs_topic.json
           if git diff --quiet --cached; then
             echo "No changes, skip commit"
           else
