@@ -210,14 +210,14 @@
     "fyzs_douyin_tag_user_count": 9148
   },
   {
-    "ts": 1791050447,
-    "sgz_follower_count": 789681,
-    "sgz_total_favorited": 16473247,
-    "yqmr_douyin_tag_view_count": 10211120063,
+    "ts": 1791054049,
+    "sgz_follower_count": 789666,
+    "sgz_total_favorited": 16473705,
+    "yqmr_douyin_tag_view_count": 10211182956,
     "yqmr_douyin_tag_user_count": 306773,
-    "sgz_douyin_tag_view_count": 2755790534,
-    "sgz_douyin_tag_user_count": 94974,
-    "fyzs_douyin_tag_view_count": 328712354,
+    "sgz_douyin_tag_view_count": 2755817773,
+    "sgz_douyin_tag_user_count": 94976,
+    "fyzs_douyin_tag_view_count": 328713547,
     "fyzs_douyin_tag_user_count": 9149
   },
   {
@@ -482,17 +482,6 @@
     "sgz_douyin_tag_view_count": 2762559540,
     "sgz_douyin_tag_user_count": 95480,
     "fyzs_douyin_tag_view_count": 328909997,
-    "fyzs_douyin_tag_user_count": 9171
-  },
-  {
-    "ts": 1791393337,
-    "sgz_follower_count": 788462,
-    "sgz_total_favorited": 16517470,
-    "yqmr_douyin_tag_view_count": 10222781125,
-    "yqmr_douyin_tag_user_count": 307522,
-    "sgz_douyin_tag_view_count": 2762613079,
-    "sgz_douyin_tag_user_count": 95487,
-    "fyzs_douyin_tag_view_count": 328911931,
     "fyzs_douyin_tag_user_count": 9171
   },
   {
@@ -1445,6 +1434,21 @@
     "mzylyr_douyin_tag_view_count": 5011931660,
     "mzylyr_douyin_tag_user_count": 111884,
     "lyrmzy_douyin_tag_view_count": 2279465750,
+    "lyrmzy_douyin_tag_user_count": 59411
+  },
+  {
+    "ts": 1791655251,
+    "sgz_follower_count": 788797,
+    "sgz_total_favorited": 16534523,
+    "yqmr_douyin_tag_view_count": 10227227047,
+    "yqmr_douyin_tag_user_count": 307328,
+    "sgz_douyin_tag_view_count": 2770436552,
+    "sgz_douyin_tag_user_count": 95584,
+    "fyzs_douyin_tag_view_count": 329002367,
+    "fyzs_douyin_tag_user_count": 9170,
+    "mzylyr_douyin_tag_view_count": 5012000591,
+    "mzylyr_douyin_tag_user_count": 111885,
+    "lyrmzy_douyin_tag_view_count": 2279506170,
     "lyrmzy_douyin_tag_user_count": 59411
   }
 ]
