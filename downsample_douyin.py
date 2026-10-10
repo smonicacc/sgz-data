@@ -9,8 +9,9 @@
   所有"天/小时"边界均按 UTC+8 计算（与 douyin.html 的 bucketizeFourHourClosest
   / bucketizeDayClosest 一致）。
 
-运行时通过环境变量接收本次采集参数：
-  RECORD_JSON    - 本次新记录的 JSON 字符串（必需，含 ts 及各项抖音指标）
+本次新记录从文件读取（collect_data.yaml 的 "Append to douyin.json" step
+会先在 inline Python 里把本条 record 写成 JSON 文件，再调用本脚本）：
+  NEW_RECORD_FILE    - 新记录 JSON 文件路径，默认 new_douyin_record.json
 
 文件路径可通过 env 覆盖（默认与 process.py 对齐）：
   DATA_FILE      - 降采样输出文件，默认 douyin.json
@@ -26,6 +27,7 @@ BJ = timezone(timedelta(hours=8))
 
 JSON_FILE = os.environ.get("DATA_FILE", "douyin.json")
 RAW_FILE = os.environ.get("DATA_RAW_FILE", "douyin-raw.json")
+NEW_RECORD_FILE = os.environ.get("NEW_RECORD_FILE", "new_douyin_record.json")
 
 
 def bj_day_start(ts: int) -> int:
@@ -43,7 +45,8 @@ def bj_4h_bucket_start(ts: int) -> int:
     return int(start.timestamp())
 
 
-new_record = json.loads(os.environ["RECORD_JSON"])
+with open(NEW_RECORD_FILE, "r", encoding="utf-8") as f:
+    new_record = json.load(f)
 
 # 1) 全量存档：append-only，永不降采样
 if Path(RAW_FILE).exists():
