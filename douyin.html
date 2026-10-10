@@ -54,9 +54,9 @@
         <option value="view" selected>抖音话题播放数</option>
         <option value="user">抖音话题参与人数</option>
         <option value="sgz">尚公主抖音号</option>
-        <!-- <option value="top10">尚公主抖音-TOP10</option>
-        <option value="latest10">尚公主抖音-最新10</option> -->
-        <!-- <option value="xhs">小红书话题浏览数</option> -->
+        <option value="top10">尚公主抖音-TOP10</option>
+        <option value="latest10">尚公主抖音-最新10</option>
+        <option value="xhs">小红书话题浏览数</option>
       </select>
     </div>
     <div class="toolbar-group">
@@ -85,8 +85,11 @@ let top10Data = {};  // {aweme_id: [{ts, digg_count, ...}, ...]} top10 / latest1
 let currentFiltered = [];
 let currentRangeObj = null;
 
-// ---- 系列基础配置：3 条话题，前缀决定字段名 ----
-// 播放数用原色（紫/红/蓝），参与人数用更鲜艳的色以在白底区分
+// ---- 系列基础配置：5 条话题，前缀决定字段名 ----
+// 播放数用原色，参与人数用更鲜艳的色以在白底区分
+// 前缀对应 data/douyin.json 里的 {prefix}_douyin_tag_{view_count|user_count} 字段名
+//   yqmr → #昀牵孟绕；sgz → #尚公主；fyzs → #扶摇直尚
+//   mzylyr → #孟子义李昀锐；lyrmzy → #李昀锐孟子义
 const SERIES_BASE = [
   { name: '#昀牵孟绕', prefix: 'yqmr',
     viewColor: '#7D4698', viewBarColor: '#B197C4',
@@ -97,6 +100,12 @@ const SERIES_BASE = [
   { name: '#扶摇直尚', prefix: 'fyzs',
     viewColor: '#5794F2', viewBarColor: '#A8C5FA',
     userColor: '#2563EB', userBarColor: '#93C5FD' },
+  { name: '#孟子义李昀锐', prefix: 'mzylyr',
+    viewColor: '#EE2E84', viewBarColor: '#FECDD3',  // Tailwind rose-600 / rose-200（rose 比 pink 红更多/紫更少，更"粉"）
+    userColor: '#DB2777', userBarColor: '#F472B6' }, // Tailwind pink-600 / pink-400
+  { name: '#李昀锐孟子义', prefix: 'lyrmzy',
+    viewColor: '#16A34A', viewBarColor: '#86EFAC',
+    userColor: '#059669', userBarColor: '#6EE7B7' },
 ];
 
 // ---- TOP10 配置：10 个作品 + 10 个高对比度色（白底明显）----
@@ -712,10 +721,8 @@ function renderTop10Chart(range, selectedMap = {}) {
           const val = p.value == null ? '-' :
             Array.isArray(p.value) ? p.value[1].toLocaleString('en-US') :
             p.value.toLocaleString('en-US');
-          // seriesName 形如 "TOP1"：tooltip 额外显示完整 aweme_id 便于定位
-          const s = seriesByName[p.seriesName];
-          const idTail = s ? ` (${s.awemeId})` : '';
-          html += `${p.marker} ${p.seriesName}${idTail}: ${val}<br/>`;
+          // tooltip 只显示 series 名字 + 数值，不附加 awemeId（用户确认不需要）
+          html += `${p.marker} ${p.seriesName}: ${val}<br/>`;
         });
         return html;
       },
@@ -767,6 +774,8 @@ function renderChart(baseFiltered, range, selectedMap = {
   '#昀牵孟绕': true,
   '#尚公主': false,
   '#扶摇直尚': false,
+  '#孟子义李昀锐': false,
+  '#李昀锐孟子义': false,
 }) {
   if (!baseFiltered.length) {
     subChart.clear();
@@ -853,8 +862,9 @@ function renderChart(baseFiltered, range, selectedMap = {
   }));
   const barSeriesData = getSeries().map(s => {
     const field = s.field;
-    // 在 allData 里找"X+step 之后最近"的值。
-    // 如果 X+step 之后没有数据（最后一个桶还没跑完），fallback 到全数据最后一条 → 显示"截至当前"的增量
+    // 在 allData 里找"boundary 之后最近"的值。
+    // 如果 boundary 之后没有数据（最后一个桶还没跑完），fallback 到全数据最后一条 → 显示"截至当前"的增量
+    // 同时也支持 boundary 之前没数据的情况：返回第一个有该 field 的值（用于新加话题的稀疏数据）
     const findFirstAfter = (boundary) => {
       let lastVal = null;
       for (const r of allData) {
@@ -866,13 +876,15 @@ function renderChart(baseFiltered, range, selectedMap = {
       return lastVal;
     };
     // category 轴下 bar data 用纯 value（按索引对齐到 barXCategories），不再带 [ts, val] 对
+    // startVal 也用 findFirstAfter 而非 b[field]：
+    //   b 是桶里 ts 最小的那条，但那条可能不带本 field（新话题稀疏数据时常见），
+    //   改成"桶起点之后第一个有该 field 的值"才能算到正确的增量
     const deltas = barData.map(b => {
-      if (b[field] == null) return 0;
       const startBoundary = bucketBoundaryUtc(b.ts);
-      const startVal = b[field]; // first-after-startBoundary
+      const startVal = findFirstAfter(startBoundary);
       const endBoundary = startBoundary + bucketStepSec;
       const endVal = findFirstAfter(endBoundary);
-      if (endVal == null) return 0; // 该 field 完全没数据
+      if (startVal == null || endVal == null) return 0; // 该 field 完全没数据
       return endVal - startVal;
     });
     return { ...s, data: deltas };
