@@ -110,8 +110,8 @@ const SERIES_BASE = [
 
 // ---- TOP10 配置：10 个作品 + 10 个高对比度色（白底明显）----
 const TOP10_ITEMS = [
-  { awemeId: '7675574770423050953', name: '七夕live图可爱*2' },
   { awemeId: '7544398141043477769', name: '0831开机风满楼大片' },
+  { awemeId: '7675574770423050953', name: '七夕live图可爱*2' },
   { awemeId: '7621751828358880622', name: '250万预约天下第一好小墨镜双人照' },
   { awemeId: '7591450498210419633', name: '喵喵' },
   { awemeId: '7518353962039561532', name: '0622官宣' },
@@ -211,10 +211,18 @@ function getSeriesChartTitle() {
   if (currentMetric === 'latest10') return '抖音作品-最新10';
   return '';
 }
-// 默认勾选：只勾选第 0 个（最近/最热门的那一个），其他全 false
+// top10 / latest10 各用指定下标（不再统一用 0）
+const DEFAULT_SELECTED_INDEX = {
+  top10: 1,     // 0831开机风满楼大片
+  latest10: 0,  // 400万预约别看书了看我视频
+};
+
+// 默认勾选：只勾选当前指标对应下标的那一个，其他全 false
 function getDefaultSelected() {
   const result = {};
-  getCurrentItems().forEach((item, i) => { result[item.name] = i === 0; });
+  const items = getCurrentItems();
+  const targetIdx = DEFAULT_SELECTED_INDEX[currentMetric] ?? 0;
+  items.forEach((item, i) => { result[item.name] = i === targetIdx; });
   return result;
 }
 
