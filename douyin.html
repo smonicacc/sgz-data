@@ -302,6 +302,16 @@ function bucketizeHourClosest(filtered, mode = 'latest') {
     arr.push(r);
     buckets.set(keyUtc, arr);
   }
+  if (mode === 'closest') {
+    return [...buckets.entries()].map(([key, arr]) => arr.reduce((best, r) => {
+      const d = Math.abs(r.ts - key);
+      const bd = Math.abs(best.ts - key);
+      // 同距离时取 ts 较大的，让点偏向桶后半（与 latest 行为一致的方向）
+      if (d < bd) return r;
+      if (d === bd && r.ts > best.ts) return r;
+      return best;
+    }, arr[0]));
+  }
   const cmp = mode === 'first'
     ? (best, r) => r.ts < best.ts ? r : best
     : (best, r) => r.ts > best.ts ? r : best;
@@ -464,9 +474,9 @@ function renderSgzChart(baseFiltered, range, selectedMap = {
 
   // 沿用同样的桶策略
   let lineData = baseFiltered;
-  if (currentRange === '3d') lineData = bucketizeHourClosest(baseFiltered);
-  else if (currentRange === '7d') lineData = bucketizeFourHourClosest(baseFiltered);
-  else if (currentRange === '14d' || currentRange === 'all' || /^month:/.test(currentRange)) lineData = bucketizeDayClosest(baseFiltered);
+  if (currentRange === '3d') lineData = bucketizeHourClosest(baseFiltered, 'closest');
+  else if (currentRange === '7d') lineData = bucketizeFourHourClosest(baseFiltered, 'closest');
+  else if (currentRange === '14d' || currentRange === 'all' || /^month:/.test(currentRange)) lineData = bucketizeDayClosest(baseFiltered, 'closest');
 
   const xMin = lineData[0].ts * 1000;
   const xMax = lineData[lineData.length - 1].ts * 1000;
@@ -696,7 +706,7 @@ function renderTop10Chart(range, selectedMap = {}) {
     });
     // bucketize 函数对输入顺序无要求（按 ts 算桶），但 xMin/xMax 依赖 [0]/[length-1]，先升序排序保证两端是最早/最晚 ts
     filtered.sort((a, b) => a.ts - b.ts);
-    if (currentRange === '3d') filtered = bucketizeHourClosest(filtered);
+    if (currentRange === '3d') filtered = bucketizeHourClosest(filtered, 'closest');
     else if (currentRange === '7d') filtered = bucketizeFourHourClosest(filtered, 'closest');
     else if (currentRange === '14d' || currentRange === 'all' || /^month:/.test(currentRange)) filtered = bucketizeDayClosest(filtered, 'closest');
     return { ...s, data: filtered };
@@ -829,7 +839,7 @@ function renderChart(baseFiltered, range, selectedMap = {
   // 折线时间桶：3d → 1h（最小粒度）；7d → 4h（对齐 BJ 0/4/8/12/16/20）；14d/month/all → 1d
   let lineData = baseFiltered;
   if (currentRange === '3d') {
-    lineData = bucketizeHourClosest(baseFiltered);
+    lineData = bucketizeHourClosest(baseFiltered, 'closest');
   } else if (currentRange === '7d') {
     lineData = bucketizeFourHourClosest(baseFiltered, 'closest');
   } else if (currentRange === '14d' || currentRange === 'all' || /^month:/.test(currentRange)) {
