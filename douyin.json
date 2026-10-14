@@ -254,14 +254,14 @@
     "fyzs_douyin_tag_user_count": 9171
   },
   {
-    "ts": 1791407733,
+    "ts": 1791411338,
     "sgz_follower_count": 788446,
-    "sgz_total_favorited": 16517766,
-    "yqmr_douyin_tag_view_count": 10222891082,
-    "yqmr_douyin_tag_user_count": 307510,
-    "sgz_douyin_tag_view_count": 2762742128,
-    "sgz_douyin_tag_user_count": 95485,
-    "fyzs_douyin_tag_view_count": 328914379,
+    "sgz_total_favorited": 16517815,
+    "yqmr_douyin_tag_view_count": 10222908650,
+    "yqmr_douyin_tag_user_count": 307511,
+    "sgz_douyin_tag_view_count": 2762787879,
+    "sgz_douyin_tag_user_count": 95487,
+    "fyzs_douyin_tag_view_count": 328914469,
     "fyzs_douyin_tag_user_count": 9171
   },
   {
@@ -594,36 +594,6 @@
     "mzylyr_douyin_tag_view_count": 5014502366,
     "mzylyr_douyin_tag_user_count": 112018,
     "lyrmzy_douyin_tag_view_count": 2280497887,
-    "lyrmzy_douyin_tag_user_count": 59454
-  },
-  {
-    "ts": 1791753335,
-    "sgz_follower_count": 788836,
-    "sgz_total_favorited": 16540593,
-    "yqmr_douyin_tag_view_count": 10229397366,
-    "yqmr_douyin_tag_user_count": 307461,
-    "sgz_douyin_tag_view_count": 2773421962,
-    "sgz_douyin_tag_user_count": 95716,
-    "fyzs_douyin_tag_view_count": 329049903,
-    "fyzs_douyin_tag_user_count": 9185,
-    "mzylyr_douyin_tag_view_count": 5014529855,
-    "mzylyr_douyin_tag_user_count": 112018,
-    "lyrmzy_douyin_tag_view_count": 2280511352,
-    "lyrmzy_douyin_tag_user_count": 59454
-  },
-  {
-    "ts": 1791756053,
-    "sgz_follower_count": 788837,
-    "sgz_total_favorited": 16540668,
-    "yqmr_douyin_tag_view_count": 10229410508,
-    "yqmr_douyin_tag_user_count": 307461,
-    "sgz_douyin_tag_view_count": 2773432848,
-    "sgz_douyin_tag_user_count": 95716,
-    "fyzs_douyin_tag_view_count": 329050249,
-    "fyzs_douyin_tag_user_count": 9185,
-    "mzylyr_douyin_tag_view_count": 5014546058,
-    "mzylyr_douyin_tag_user_count": 112018,
-    "lyrmzy_douyin_tag_view_count": 2280519513,
     "lyrmzy_douyin_tag_user_count": 59454
   },
   {
@@ -1689,6 +1659,21 @@
     "mzylyr_douyin_tag_view_count": 5019019418,
     "mzylyr_douyin_tag_user_count": 112081,
     "lyrmzy_douyin_tag_view_count": 2283275907,
+    "lyrmzy_douyin_tag_user_count": 59461
+  },
+  {
+    "ts": 1792015257,
+    "sgz_follower_count": 788881,
+    "sgz_total_favorited": 16555336,
+    "yqmr_douyin_tag_view_count": 10235125286,
+    "yqmr_douyin_tag_user_count": 307374,
+    "sgz_douyin_tag_view_count": 2778230804,
+    "sgz_douyin_tag_user_count": 95865,
+    "fyzs_douyin_tag_view_count": 329217912,
+    "fyzs_douyin_tag_user_count": 9187,
+    "mzylyr_douyin_tag_view_count": 5019029676,
+    "mzylyr_douyin_tag_user_count": 112081,
+    "lyrmzy_douyin_tag_view_count": 2283281390,
     "lyrmzy_douyin_tag_user_count": 59461
   }
 ]
