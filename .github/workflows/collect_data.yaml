@@ -361,6 +361,7 @@ jobs:
           done
 
       - name: Append to douyin.json
+        id: append_douyin
         if: ${{ github.event.inputs.FORCE == 'true' || steps.douyin_check.outputs.due == 'true' }}
         run: |
           # Build the new record inline (one per run, single ts), then hand off
@@ -447,6 +448,7 @@ jobs:
           python3 push_to_grafana.py douyin-user --record-file douyin.json --last
 
       - name: Fetch xiaohongshu topic view_num and append to xhs_topic.json
+        id: fetch_xhs
         if: ${{ github.event.inputs.FORCE == 'true' || steps.douyin_check.outputs.due == 'true' }}
         env:
           XHS_COOKIE: ${{ secrets.XHS_COOKIE }}
@@ -465,7 +467,7 @@ jobs:
           python3 push_to_grafana.py xhs-topic --record-file xhs_topic.json --last
 
       - name: Commit and push updated data
-        if: github.event.inputs.DRY_RUN != 'true'
+        if: always() && github.event.inputs.DRY_RUN != 'true' && (steps.process_data.outcome == 'success' || steps.append_douyin.outcome == 'success' || steps.fetch_xhs.outcome == 'success')
         run: |
           git config --global user.name "AutoCollector"
           git config --global user.email "auto@collector.local"
