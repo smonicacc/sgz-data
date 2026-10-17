@@ -39,6 +39,14 @@
 #dataTable th:nth-child(3),#dataTable td:nth-child(3){width:12%;}
 #dataTable th:nth-child(4),#dataTable td:nth-child(4){width:15%;}
 #dataTable th:nth-child(5),#dataTable td:nth-child(5){width:30%;}
+/* 热度折线图下的表格（'hot' 模式专属，复用 #dataTable 的边框/字体族但隐藏默认状态） */
+#hotDataTable{border-collapse:collapse;width:100%;margin-top:20px;font-family:sans-serif;display:none;}
+#hotDataTable.show{display:table;}
+#hotDataTable th,#hotDataTable td{border:1px solid #ddd;padding:8px 12px;text-align:right;}
+/* 三列百分比：时间 45% / 热度 20% / 变化 35%（时间最长、热度纯数字最短、变化中等） */
+#hotDataTable th:nth-child(1),#hotDataTable td:nth-child(1){width:40%;}
+#hotDataTable th:nth-child(2),#hotDataTable td:nth-child(2){width:20%;}
+#hotDataTable th:nth-child(3),#hotDataTable td:nth-child(3){width:40%;text-align:left;}
 #loadMoreWrap{text-align:center;margin-top:20px;}
 #loadMoreBtn{padding:12px 32px;font-size:18px;cursor:pointer;border:1px solid #ccc;background:#fff;border-radius:4px;}
 #loadMoreBtn:hover{background:#f5f5f5;}
@@ -76,6 +84,10 @@
 </div>
 <div id="hotStats" class="hot-stats"></div>
 <div id="chart"></div>
+<table id="hotDataTable">
+  <thead><tr><th>时间</th><th>热度</th><th>变化</th></tr></thead>
+  <tbody></tbody>
+</table>
 <div id="barChart"></div>
 <table id="dataTable">
   <thead><tr><th>时间</th><th>预约数(万)</th><th>增量</th><th>每分钟增量</th><th>当日累积增量</th></tr></thead>
@@ -92,6 +104,7 @@ let refreshTimer = null;
 let allData = [];
 let hotMaxData = null;  // {all_time_max_hot_num, all_time_max_ts, today_max_hot_num, today_max_ts, today_bj_date}；缺失时为 null
 let tableLimit = 50;
+let hotTableLimit = 100;  // 热度明细表默认显示 100 条，'+100' 翻页（与预约量表共用 #loadMoreWrap 按钮）
 let currentFiltered = [];
 let currentRangeObj = null;
 // 数据起始日（BJ）：早于这个 BJ 日的数据，折线图和表格都不显示
@@ -137,7 +150,8 @@ function toggleChartDisplay() {
   document.getElementById('chart').style.display = isLine ? 'block' : 'none';
   document.getElementById('barChart').style.display = isBar ? 'block' : 'none';
   document.getElementById('dataTable').style.display = isHot ? 'none' : '';
-  document.getElementById('loadMoreWrap').style.display = isHot ? 'none' : '';
+  // #loadMoreWrap 不再在 hot 模式强制隐藏 — 两张表共用同一个"更多"按钮，由各自的 render 函数按剩余数据决定显隐
+  document.getElementById('hotDataTable').classList.toggle('show', isHot);
   document.getElementById('hotStats').classList.toggle('show', isHot);
   if (isBar) barChart.resize();
   else subChart.resize();
@@ -333,6 +347,39 @@ function renderHotChart(filtered, range) {
       itemStyle: { color: '#DC2626' },
     }],
   }, true);
+}
+
+// 热度折线图下方的明细表：时间 / 热度 / 变化（与上一条数据的差）
+// 按 ts 降序展示（最新在上）；末条没有"上一条"，变化列固定为 -
+// 颜色规则：
+//   - 上升（d > 0）：绿色上箭头 + '+' + 绝对值
+//   - 下降（d < 0）：红色下箭头 + '-' + 绝对值
+//   - 不变（d === 0）：'-'（按用户要求）
+function renderHotTable(filtered) {
+  const tbody = document.querySelector('#hotDataTable tbody');
+  // 不跟 currentRange 走：表格只看最近 24h，即便用户在折线图上选 3d 也只展示最新 24h 的明细
+  const cutoff24hMs = Date.now() - 24 * 3600 * 1000;
+  const withHot = filtered.filter(r => typeof r.hot_num === 'number' && r.ts * 1000 >= cutoff24hMs);
+  const sorted = [...withHot].sort((a, b) => b.ts - a.ts);  // 降序：最新在上
+  const visible = sorted.slice(0, hotTableLimit);
+  tbody.innerHTML = visible.map((r, i) => {
+    // prev 取 sorted 里"下一条"（更早），不分页与否 — 变化值的语义是时间上的"上一条"，不是分页相邻
+    const prev = sorted[i + 1];
+    let deltaCell = '-';
+    if (prev) {
+      const d = r.hot_num - prev.hot_num;
+      if (d > 0) {
+        deltaCell = `<span style="color:#16A34A">▲ +${d}</span>`;
+      } else if (d < 0) {
+        deltaCell = `<span style="color:#DC2626">▼ -${-d}</span>`;
+      }
+      // d === 0 保持 '-'
+    }
+    return `<tr><td>${new Date(r.ts * 1000).toLocaleString()}</td><td>${r.hot_num}</td><td>${deltaCell}</td></tr>`;
+  }).join('');
+  // 剩余还有数据 → 显示"更多"按钮；否则隐藏
+  const btnWrap = document.getElementById('loadMoreWrap');
+  if (btnWrap) btnWrap.style.display = sorted.length > hotTableLimit ? '' : 'none';
 }
 
 // 把 raw data 中间隔 ≈2h 的相邻两点在中点处插入一个合成点
@@ -706,10 +753,12 @@ function applyRange() {
     const tsMs = r.ts * 1000;
     return tsMs >= Math.max(currentRangeObj.min, cutoffMs) && tsMs <= currentRangeObj.max;
   });
-  tableLimit = 50;  // 切换 range 时重置分页
+  tableLimit = 50;        // 切换 range 时重置预约量表的分页
+  hotTableLimit = 100;    // 切换 range 时重置热度表的分页
   if (currentChartType === 'hot') {
-    // 热度模式只画折线，不渲染表格 / 柱状图（toggleChartDisplay 已隐藏对应容器）
+    // 热度模式：折线 + 下方明细表（柱状图 / 主表格已被 toggleChartDisplay 隐藏）
     renderHotChart(currentFiltered, currentRangeObj);
+    renderHotTable(currentFiltered);
   } else {
     renderChart(currentFiltered, currentRangeObj);
     renderBarChart(currentFiltered, currentRangeObj);
@@ -772,8 +821,13 @@ chartSelect.addEventListener('change', () => {
 loadData().then(() => startAutoRefresh());
 
 document.getElementById('loadMoreBtn').addEventListener('click', () => {
-  tableLimit += 50;
-  renderTable(currentFiltered, currentRangeObj);
+  if (currentChartType === 'hot') {
+    hotTableLimit += 100;
+    renderHotTable(currentFiltered);
+  } else {
+    tableLimit += 50;
+    renderTable(currentFiltered, currentRangeObj);
+  }
 });
 
 window.addEventListener('resize', () => {
