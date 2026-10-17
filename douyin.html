@@ -677,15 +677,16 @@ function toggleTop10Series(name) {
   subChart.dispatchAction({ type: 'legendToggleSelect', name });
 }
 
-// "全部" 切换：当前若不是 all-on → 全部勾选；若是 all-on → 恢复到默认（仅第 0 项勾选）
+// "全部" 切换：当前若不是 all-on → 全部勾选；若是 all-on → 恢复到默认（仅 DEFAULT_SELECTED_INDEX 项勾选）
 function toggleSelectAll() {
   if (currentMetric !== 'top10' && currentMetric !== 'latest10') return;
   const items = getCurrentItems();
   const allOn = items.every(item => lastSelected[item.name] !== false);
   const newSelected = {};
   if (allOn) {
-    // 全部已选 → 恢复默认（仅 index=0 勾选）
-    items.forEach((item, i) => { newSelected[item.name] = i === 0; });
+    // 全部已选 → 恢复默认（仅 DEFAULT_SELECTED_INDEX[currentMetric] 那一项勾选）
+    const targetIdx = DEFAULT_SELECTED_INDEX[currentMetric] ?? 0;
+    items.forEach((item, i) => { newSelected[item.name] = i === targetIdx; });
   } else {
     // 不是全部选中 → 全部选中
     items.forEach(item => { newSelected[item.name] = true; });
