@@ -18,6 +18,15 @@
 /* SVG 图标：紫色圆底 + 白色前进箭头，提示点击 */
 .nav-emoji{display:inline-block;vertical-align:middle;margin-right:2px;}
 #chart{width:100%;height:600px;}
+/* 热度指标的 stat 行（折线图上方，仅 'hot' 模式显示） */
+.hot-stats{display:none;gap:24px;padding:8px 0 12px;font-family:sans-serif;align-items:baseline;}
+.hot-stats.show{display:flex;}
+.hot-stat{display:flex;align-items:baseline;gap:10px;}
+.hot-stat-label{color:#666;font-size:14px;}
+.hot-stat-value{font-size:32px;font-weight:600;color:#991B1B;font-variant-numeric:tabular-nums;}
+.hot-stat.today .hot-stat-value{color:#F87171;}
+.hot-stat-date{color:#999;font-size:12px;margin-left:4px;}
+.hot-stat-note{color:#999;font-size:12px;margin-left:12px;}
 #barChart{width:100%;height:400px;margin-top:20px;display:none;}
 #dataTable{border-collapse:collapse;width:100%;margin-top:20px;font-family:sans-serif;}
 #dataTable th,#dataTable td{border:1px solid #ddd;padding:8px 12px;text-align:right;}
@@ -46,11 +55,13 @@
       <select id="chartSelect">
         <option value="line" selected>预约数</option>
         <option value="bar">预约增量</option>
+        <option value="hot">热度</option>
       </select>
     </div>
     <div class="toolbar-group">
       <label for="rangeSelect">时间范围：</label>
       <select id="rangeSelect">
+        <option value="1d">最近24小时</option>
         <option value="3d" selected>最近3天</option>
         <option value="7d">最近7天</option>
         <option value="14d">最近14天</option>
@@ -63,6 +74,7 @@
     </div>
   </div>
 </div>
+<div id="hotStats" class="hot-stats"></div>
 <div id="chart"></div>
 <div id="barChart"></div>
 <table id="dataTable">
@@ -75,15 +87,18 @@
 <script>
 // ---- 状态 ----
 let currentRange = '3d';
-let currentChartType = 'line';  // 'line' = 预约数折线图；'bar' = 预约数增量柱状图
+let currentChartType = 'line';  // 'line' = 预约数折线图；'bar' = 预约数增量柱状图；'hot' = hot_num 折线图（红色系，仅最近 3 天）
 let refreshTimer = null;
 let allData = [];
+let hotMaxData = null;  // {all_time_max_hot_num, all_time_max_ts, today_max_hot_num, today_max_ts, today_bj_date}；缺失时为 null
 let tableLimit = 50;
 let currentFiltered = [];
 let currentRangeObj = null;
 // 数据起始日（BJ）：早于这个 BJ 日的数据，折线图和表格都不显示
 // 设为 null 则不限制
 const DAY_CUM_START_BJ = '2026-09-09';
+// 启用自动刷新的 range（短窗口实时数据；更长的 range 不刷，避免切换图表时的浪费）
+const AUTOREFRESH_RANGES = new Set(['1d', '3d']);
 
 const chartDom = document.getElementById('chart');
 const subChart = echarts.init(chartDom);
@@ -95,21 +110,69 @@ const refreshStatus = document.getElementById('refreshStatus');
 
 // 根据 currentChartType 切换两个图表容器的显隐，并 resize 当前可见的
 // 注：#barChart 在 CSS 里默认 display:none，所以"显示"必须用显式 'block' 覆盖，不能用 ''
+// 渲染顶部 stat（历史最高 / 当日最高），仅在 hotMaxData 存在时填内容；
+// 显示与否交给 toggleChartDisplay 控制（'hot' 模式才加 .show）
+function updateHotStats() {
+  const el = document.getElementById('hotStats');
+  if (!hotMaxData) { el.innerHTML = ''; return; }
+  el.innerHTML =
+    `<div class="hot-stat">
+       <span class="hot-stat-label">历史最高热度</span>
+       <span class="hot-stat-value">${hotMaxData.all_time_max_hot_num}</span>
+     </div>
+     <div class="hot-stat today">
+       <span class="hot-stat-label">当日最高热度</span>
+       <span class="hot-stat-value">${hotMaxData.today_max_hot_num}</span>
+       <span class="hot-stat-date">${hotMaxData.today_bj_date}</span>
+       <span class="hot-stat-note">受数据采集周期影响，最高热度值仅供参考</span>
+     </div>`;
+}
+
+// 'hot' 模式只显示折线图，隐藏柱状图 + 表格 + "更多"按钮（保持专注）
+// 'hot' 模式下额外显示顶部 stat 行（历史最高 / 当日最高）
 function toggleChartDisplay() {
-  const showLine = currentChartType === 'line';
-  document.getElementById('chart').style.display = showLine ? 'block' : 'none';
-  document.getElementById('barChart').style.display = showLine ? 'none' : 'block';
-  if (showLine) subChart.resize();
-  else barChart.resize();
+  const isLine = currentChartType === 'line' || currentChartType === 'hot';
+  const isBar = currentChartType === 'bar';
+  const isHot = currentChartType === 'hot';
+  document.getElementById('chart').style.display = isLine ? 'block' : 'none';
+  document.getElementById('barChart').style.display = isBar ? 'block' : 'none';
+  document.getElementById('dataTable').style.display = isHot ? 'none' : '';
+  document.getElementById('loadMoreWrap').style.display = isHot ? 'none' : '';
+  document.getElementById('hotStats').classList.toggle('show', isHot);
+  if (isBar) barChart.resize();
+  else subChart.resize();
+}
+
+// 时间范围下拉的两种取值集合：
+//   默认（预约数/预约增量）：跟 index.html 里静态 <option> 保持一致（含月份/all，便于扩展回填）
+//   热度（hot）：保留最近 24 小时 + 最近 3 天两个短窗口，符合"只显示近期热度趋势"的产品诉求
+const RANGE_OPTIONS_DEFAULT = [
+  ['1d', '最近24小时'],
+  ['3d', '最近3天'],
+  ['7d', '最近7天'],
+  ['14d', '最近14天'],
+  ['month:9', '9月'],
+  ['month:10', '10月'],
+  ['all', '全部'],
+];
+const RANGE_OPTIONS_HOT = [['1d', '最近24小时'], ['3d', '最近3天']];
+
+function rebuildRangeSelect() {
+  const options = currentChartType === 'hot' ? RANGE_OPTIONS_HOT : RANGE_OPTIONS_DEFAULT;
+  rangeSelect.innerHTML = options
+    .map(([v, l]) => `<option value="${v}">${l}</option>`)
+    .join('');
+  rangeSelect.value = options[0][0];
+  currentRange = rangeSelect.value;
 }
 
 // ---- 时间范围解析 ----
 function parseRange(rangeValue) {
   const year = new Date().getFullYear();
-  if (rangeValue === '3d' || rangeValue === '7d' || rangeValue === '14d') {
-    const days = rangeValue === '3d' ? 3 : rangeValue === '7d' ? 7 : 14;
+  const dayMap = { '1d': 1, '2d': 2, '3d': 3, '7d': 7, '14d': 14 };
+  if (rangeValue in dayMap) {
     return {
-      min: Date.now() - days * 86400 * 1000,
+      min: Date.now() - dayMap[rangeValue] * 86400 * 1000,
       max: Date.now(),
     };
   }
@@ -211,6 +274,65 @@ function renderChart(filtered, range) {
       itemStyle: { color: '#8361B2' },
     }],
   }, true);  // true = 不合并，完全替换
+}
+
+// 热度折线图：用 record.hot_num 画线，红色系（Tailwind red-600）
+// 仅在 'hot' 模式下调用，range 由 RANGE_OPTIONS_HOT 限制为短窗口（24h / 3d）
+// 旧 record（COLLECT_HOT_NUM=false 或抽取失败）没有 hot_num 字段，自动跳过
+function renderHotChart(filtered, range) {
+  const withHot = filtered.filter(r => typeof r.hot_num === 'number');
+  if (!withHot.length) {
+    subChart.clear();
+    subChart.setOption({
+      title: { text: '热度', left: 'center', subtext: '该时间范围内无 hot_num 数据' },
+    });
+    return;
+  }
+
+  const values = withHot.map(r => r.hot_num);
+  const dataMax = Math.max(...values);
+  const dataMin = Math.min(...values);
+  // hot_num 量级与 attent_num 相当（百万级），复用同款「万」单位 + 千分位 formatter
+  const yMin = Math.floor(dataMin / 1000) * 1000;
+  const yMax = Math.ceil(dataMax / 1000) * 1000;
+  const interval = calcInterval(yMax - yMin, 1000);
+
+  subChart.setOption({
+    title: { text: '热度', left: 'center' },
+    // 不加千分位/万分位逗号，原始整数直出
+    tooltip: { trigger: 'axis' },
+    xAxis: {
+      type: 'time',
+      min: Math.max(range.min, withHot[0].ts * 1000),
+      max: Math.min(range.max, withHot[withHot.length - 1].ts * 1000),
+      minInterval: 3600000,
+      axisLabel: {
+        rotate: 30,
+        hideOverlap: true,
+        formatter: (val) => {
+          const d = new Date(val);
+          if (d.getMinutes() === 0 && d.getSeconds() === 0) return d.toLocaleString();
+          return '';
+        },
+      },
+    },
+    yAxis: {
+      type: 'value',
+      min: yMin,
+      max: yMax,
+      interval: interval,
+      axisLabel: { formatter: v => Math.floor(v / 1000) / 10 + '万' },
+    },
+    series: [{
+      name: '热度',
+      type: 'line',
+      symbolSize: 1,
+      data: withHot.map(item => [item.ts * 1000, item.hot_num]),
+      smooth: true,
+      lineStyle: { color: '#DC2626', width: 2 },           // Tailwind red-600
+      itemStyle: { color: '#DC2626' },
+    }],
+  }, true);
 }
 
 // 把 raw data 中间隔 ≈2h 的相邻两点在中点处插入一个合成点
@@ -585,9 +707,14 @@ function applyRange() {
     return tsMs >= Math.max(currentRangeObj.min, cutoffMs) && tsMs <= currentRangeObj.max;
   });
   tableLimit = 50;  // 切换 range 时重置分页
-  renderChart(currentFiltered, currentRangeObj);
-  renderBarChart(currentFiltered, currentRangeObj);
-  renderTable(currentFiltered, currentRangeObj);
+  if (currentChartType === 'hot') {
+    // 热度模式只画折线，不渲染表格 / 柱状图（toggleChartDisplay 已隐藏对应容器）
+    renderHotChart(currentFiltered, currentRangeObj);
+  } else {
+    renderChart(currentFiltered, currentRangeObj);
+    renderBarChart(currentFiltered, currentRangeObj);
+    renderTable(currentFiltered, currentRangeObj);
+  }
 }
 
 // ---- 自动刷新 ----
@@ -611,13 +738,21 @@ function stopAutoRefresh() {
 async function loadData() {
   const res = await fetch('./data.json?t=' + Date.now());
   allData = await res.json();
+  // 热管理（all_time_max / today_max）— process.py 维护；缺失则保留 null（顶部 stat 不渲染）
+  try {
+    const res2 = await fetch('./data-hot-max.json?t=' + Date.now());
+    hotMaxData = res2.ok ? await res2.json() : null;
+  } catch (e) {
+    hotMaxData = null;
+  }
+  updateHotStats();
   applyRange();
 }
 
 // ---- 初始化 ----
 rangeSelect.addEventListener('change', () => {
   currentRange = rangeSelect.value;
-  if (currentRange === '3d') {
+  if (AUTOREFRESH_RANGES.has(currentRange)) {
     startAutoRefresh();
   } else {
     stopAutoRefresh();
@@ -626,7 +761,13 @@ rangeSelect.addEventListener('change', () => {
 });
 chartSelect.addEventListener('change', () => {
   currentChartType = chartSelect.value;
+  // 'hot' 模式的 range 选项集合跟其它模式不同，先重建再 applyRange；
+  // 重建函数会把 currentRange 同步成新模式的第一项（hot → '2d'，其它 → '3d'）
+  rebuildRangeSelect();
   toggleChartDisplay();
+  if (AUTOREFRESH_RANGES.has(currentRange)) startAutoRefresh();
+  else stopAutoRefresh();
+  applyRange();
 });
 loadData().then(() => startAutoRefresh());
 

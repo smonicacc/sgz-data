@@ -10,7 +10,8 @@
 
 | 文件 | 内容 | 每条 record 结构 |
 |------|------|----------------|
-| `data.json` / `data-raw.json` | 腾讯视频《尚公主》单点 `attent_num`（`hot_num` 仅入 `data-raw.json`） | `{ts, value}`；`data-raw.json` 开启 `COLLECT_HOT_NUM` 后额外带 `hot_num`（经 `process.py` 分层归档） |
+| `data.json` / `data-raw.json` | 腾讯视频《尚公主》单点 `attent_num`（开启 `COLLECT_HOT_NUM` 时 record 顺带带 `hot_num`） | `{ts, value}`；开启 `COLLECT_HOT_NUM` 后额外带 `hot_num`（经 `process.py` 分层归档；两文件均带，便于 `push_to_grafana.py` 回填 `qq_video_hot_num`） |
+| `data-hot-max.json` | `hot_num` 历史 / 当日最大值（用于热度折线图参考线） | `{all_time_max_hot_num, all_time_max_ts, today_max_hot_num, today_max_ts, today_bj_date}`；`today_bj_date` 跨过 BJ 0 点时 `today_*` 自动重置为首次采集值 |
 | `douyin.json` / `douyin-raw.json` | 抖音话题 + 用户粉丝 | `{ts, sgz_follower_count, sgz_total_favorited, <alias>_douyin_tag_view_count, <alias>_douyin_tag_user_count}`；`douyin-raw.json` 全量、`douyin.json` 经 `downsample_douyin.py` BJ-时分桶降采样 |
 | `xhs_topic.json` | 小红书 5 个话题阅读量 | `{ts, sgz_tag_view_num, yqmr_tag_view_num, fyzs_tag_view_num, mzylyr_tag_view_num, lyrmzy_tag_view_num}` |
 | `data/user_posts.json` | 抖音创作者最近帖子快照 | `{fetched_at, aweme_list:[{aweme_id, statistics:{...}}]}` |
@@ -28,10 +29,77 @@
 | [`fetch_douyin.py`](fetch_douyin.py) | 抓取一个抖音话题的 `viewCount` / `userCount`（CLI 接收 `HID` + `TAG_NAME` 环境变量） |
 | [`fetch_user_posts.py`](fetch_user_posts.py) | 抓取抖音创作者最近帖子快照 + 写入 history |
 | [`fetch_xhs_topic.py`](fetch_xhs_topic.py) | 抓取小红书 5 个话题 `view_num`（TOPICS 列表写死在脚本里，详见 [xiaohongshu.md](xiaohongshu.md)） |
-| [`process.py`](process.py) | 把 `data.json` 的单点 `value` 按时间做分层归档（`data-raw.json` = 原始，`data.json` = 降采样后；env `RECORD_HOT_NUM` 非空时额外写入 `hot_num` 字段 — **仅入 `data-raw.json`，不进 `data.json`**） |
+| [`process.py`](process.py) | 把 `data.json` 的单点 `value` 按时间做分层归档（`data-raw.json` = 原始，`data.json` = 降采样后；env `RECORD_HOT_NUM` 非空时 record 顺带带 `hot_num` 字段，**两文件均写**，便于 `push_to_grafana.py` 回填 `qq_video_hot_num`）；同时维护 `data-hot-max.json`（all_time_max + today_max，跨 BJ 0 点重置 today） |
 | [`downsample_douyin.py`](downsample_douyin.py) | 把 `douyin.json` 的多字段记录按 BJ 时间分桶降采样：`<=3d` 全保留 / `3d<age<=7d` 按 4 小时桶（00/04/08/12/16/20）/ `>7d` 按天桶（BJ 0:00）；`douyin-raw.json` 全量、`douyin.json` 降采样后 |
 
----
+### 2.1 抖音话题 HID（`cid`）的获取方式
+
+`fetch_douyin.py` 需要 `HID` 作为输入（`collect_data.yaml` 的 `PAIRS` 数组维护了 5 个话题）。三种获取方式，按可靠性排序：
+
+#### 2.1.1 手动从话题详情页（最简单）
+
+1. douyin.com 搜中文话题名 → 切到「话题」标签 → 点进话题详情页
+2. 地址栏 URL 形如 `https://www.douyin.com/hashtag/1681434850032712`，数字就是 `HID`（`cid`）
+3. App 内：话题页 → 分享 → 复制链接，URL 里的数字同上
+
+把 `HID` 与中文名一起填到 `PAIRS`，`fetch_douyin.py` 会用 `TAG_NAME` 跟页面里的 `chaName` 做交叉校验（`fetch_douyin.py:108`），填错直接报错退出。
+
+#### 2.1.2 从视频详情接口挖（适合任意已有视频）
+
+任一**挂了该话题标签**的视频都可以挖——只要在视频文案里出现过 `#话题名`，详情接口的 `text_extra` 就一定带它的 `hashtag_id`。要选该视频的”进入详情页“，json 中搜 hashtag
+
+**请求**
+
+```
+GET https://www.douyin.com/aweme/v1/web/aweme/detail/
+  ?aweme_id=7694296270022017265
+  &device_platform=webapp&aid=6383&channel=channel_pc_web
+  &pc_client_type=1&version_code=190500&version_name=19.5.0
+  &cookie_enabled=true&platform=PC&downlink=10
+  &msToken=...&a_bogus=...
+```
+
+> 需要登录态 cookie + `a_bogus` 签名。无登录时这条接口被挡（实测返回空），所以这一步是登录态浏览器里做的。
+
+**响应里三个地方带 `cid`，任选其一：**
+
+| 字段 | 内容 | 说明 |
+|------|------|------|
+| `aweme_detail.text_extra[]` | `{"type":1,"hashtag_id":"...","hashtag_name":"..."}` | 视频文案里的每个 `#话题`，**最常用** |
+| `aweme_detail.cha_list[]` | `{"cid":"...","cha_name":"...","view_count":...}` | 关联话题列表，`cid` 与上同值 |
+| `aweme_detail.challenge` | `{"cid":"...","cha_name":"..."}` | 单个主话题，部分视频有 |
+
+`hashtag_id` / `cid` 与 `fetch_douyin.py:58` 里匹配的 `cid` 是同一个数字，拼出来就是 `https://www.douyin.com/hashtag/<id>`。
+
+**在浏览器里 30 秒拿到：**
+1. 登录态打开目标视频
+2. F12 → Network → 过滤框输 `aweme/detail` → 点开那条请求 → Response
+3. 搜 `hashtag_id` 或 `cha_list`，或直接右键 "Copy response" 存成 `resp.json`
+
+**抽 `cid` 的一行 Python：**
+
+```bash
+python3 - <<'PY'
+import json
+d = json.load(open('resp.json', encoding='utf-8'))['aweme_detail']
+for t in d.get('text_extra') or []:
+    if t.get('hashtag_id'):
+        print(t['hashtag_id'], t.get('hashtag_name'))
+for c in d.get('cha_list') or []:
+    print('cha_list', c.get('cid'), c.get('cha_name'))
+print('challenge', (d.get('challenge') or {}).get('cid'), (d.get('challenge') or {}).get('cha_name'))
+PY
+```
+
+要把这个跑进 CI 自动化，套路和 `fetch_user_posts.py` 一样：浏览器 Copy as cURL → 存到 `captured/` → `parse_curl` 解析 → bash 重放。需要的是登录态 cookie，已有的 `DOUYIN_PROFILE_COOKIE` Secret 不一定够（profile 接口和 search 接口可能用不同 cookie），必要时再加一个 `DOUYIN_SEARCH_COOKIE` Secret。
+
+#### 2.1.3 从搜索接口挖（自动化唯一可行路径）
+
+`/aweme/v1/web/general/search/single/` 的话题结果里有 `challenge_info.cid`。DevTools 流程同 §2.1.2，过滤框输 `search/single`、切到「话题」tab，响应 `data[]` 里 `type=challenge` 的项即带 `cid` + `cha_name`。
+
+实测：这条接口**也**需要登录态，无 cookie 直接返回 2483「请先登录」或空响应，所以本质和 §2.1.2 同源，自动化时按同一种 cookie 一起处理。
+
+
 
 ## 3. GitHub Actions 调度
 
@@ -49,7 +117,7 @@
 | `CID` | `mzc002001w361jz` | 腾讯频道 cid |
 | `DOUYIN_INTERVAL_HOURS` | `4` | douyin 采集间隔（小时）。`0` = 永远 due |
 | `FORCE` | `false` | 跳过 due 检查，强制跑 douyin + xhs |
-| `COLLECT_HOT_NUM` | `false` | 在同一次 QQ 视频请求里顺带抓 `hot_num`，仅写进 `data-raw.json`（`data.json` 不带）；不影响 `attent_num` 主流 |
+| `COLLECT_HOT_NUM` | `false` | 在同一次 QQ 视频请求里顺带抓 `hot_num`，写入 `data-raw.json` 和 `data.json`；不影响 `attent_num` 主流 |
 | `DRY_RUN` | `false` | 只采集、不 commit/push |
 
 ### 3.1 双条件 due 判断（`douyin_check` step）
@@ -81,7 +149,7 @@
 10. `Push xiaohongshu topic view to Grafana Cloud Prometheus`（`xhs-topic`，仅 `FORCE || due`）
 11. `Commit and push updated data`（`DRY_RUN != 'true'`）
 
-`git add` 列表：`data.json data-raw.json douyin.json douyin-raw.json xhs_topic.json`。
+`git add` 列表：`data.json data-raw.json data-hot-max.json douyin.json douyin-raw.json xhs_topic.json`。
 
 ---
 

@@ -11,6 +11,12 @@
   hot_num 若存在会随 record 一起落到 data-raw.json 和 data.json；
   缺失时该字段整体不写（push_to_grafana.py 会按 record 字段是否存在自动映射）
 
+  另维护一个 data-hot-max.json（每次有 hot_num 时更新）：
+    - all_time_max_hot_num / all_time_max_ts：历史上最大的 hot_num
+    - today_max_hot_num / today_max_ts / today_bj_date：
+        BJ 日期上"当天"最大的 hot_num；BJ 日期跨过 0 点自动重置
+  文件不存在时按首次写入初始化；index.html 拉到后会在热度折线图上画两条 markLine
+
 运行时通过环境变量接收本次采集参数：
   RECORD_TS      - 本次记录时间戳（秒）
   RECORD_VAL     - 本次记录数值
@@ -56,6 +62,7 @@ def bucket_pick(records, mode):
 
 JSON_FILE = os.environ.get("DATA_FILE", "data.json")
 RAW_FILE = os.environ.get("DATA_RAW_FILE", "data-raw.json")
+HOT_MAX_FILE = os.environ.get("HOT_MAX_FILE", "data-hot-max.json")
 now_ts = int(time.time())
 
 new_record = {
@@ -84,6 +91,37 @@ else:
 raw_data.append(new_record)
 with open(RAW_FILE, "w", encoding="utf-8") as f:
     json.dump(raw_data, f, ensure_ascii=False, indent=2)
+
+# 1.5) 热管理（仅在本次 record 带 hot_num 时更新；无 hot_num 则保持原文件不变）
+#  - all_time_max：单值最大，跨 BJ 日期不重置
+#  - today_max：以 today_bj_date 键入，跨过 BJ 0 点整文件重置为本次 hot_num
+if "hot_num" in new_record:
+    current_hot = new_record["hot_num"]
+    current_ts = new_record["ts"]
+    # 当前 BJ 日期（"当天" 用 UTC+8 日期切分，不跟 now_ts 走避免零点附近漂移）
+    bj_date_str = time.strftime("%Y-%m-%d", time.gmtime(current_ts + BJ_OFFSET))
+
+    if Path(HOT_MAX_FILE).exists():
+        with open(HOT_MAX_FILE, "r", encoding="utf-8") as f:
+            hot_max = json.load(f)
+    else:
+        hot_max = {}
+
+    if current_hot > hot_max.get("all_time_max_hot_num", -1):
+        hot_max["all_time_max_hot_num"] = current_hot
+        hot_max["all_time_max_ts"] = current_ts
+
+    if hot_max.get("today_bj_date") != bj_date_str:
+        # 跨过 BJ 0 点：当日最高重置为本次采集值
+        hot_max["today_max_hot_num"] = current_hot
+        hot_max["today_max_ts"] = current_ts
+        hot_max["today_bj_date"] = bj_date_str
+    elif current_hot > hot_max.get("today_max_hot_num", -1):
+        hot_max["today_max_hot_num"] = current_hot
+        hot_max["today_max_ts"] = current_ts
+
+    with open(HOT_MAX_FILE, "w", encoding="utf-8") as f:
+        json.dump(hot_max, f, ensure_ascii=False, indent=2)
 
 # 2) 加载降采样文件作为降采样基础
 if Path(JSON_FILE).exists():

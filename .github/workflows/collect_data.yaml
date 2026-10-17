@@ -472,7 +472,7 @@ jobs:
         run: |
           git config --global user.name "AutoCollector"
           git config --global user.email "auto@collector.local"
-          git add data.json data-raw.json douyin.json douyin-raw.json xhs_topic.json
+          git add data.json data-raw.json data-hot-max.json douyin.json douyin-raw.json xhs_topic.json
           if git diff --quiet --cached; then
             echo "No changes, skip commit"
           else
