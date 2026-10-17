@@ -31,7 +31,7 @@ on:
         required: true
         default: '4'
       COLLECT_HOT_NUM:
-        description: 是否在同一次请求里顺带采集腾讯视频 hot_num（仅写入 data-raw.json，不进 data.json；不影响 attent_num）
+        description: 是否在同一次请求里顺带采集腾讯视频 hot_num（写入 data-raw.json 和 data.json；不影响 attent_num）
         type: choice
         required: true
         default: 'true'
@@ -341,6 +341,7 @@ jobs:
           # Each tuple produces one set of `<alias>_tag_view_count` /
           # `<alias>_tag_user_count` fields in the single per-run record.
           # Edit this list to add/remove hashtags.
+           # 1590105432134660 孟子义
           PAIRS=(
             "1785612028243012 昀牵孟绕 yqmr"
             "1681434850032712 尚公主 sgz"
