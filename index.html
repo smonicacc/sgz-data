@@ -176,7 +176,9 @@ function rebuildRangeSelect() {
   rangeSelect.innerHTML = options
     .map(([v, l]) => `<option value="${v}">${l}</option>`)
     .join('');
-  rangeSelect.value = options[0][0];
+  // 预约数/预约增量默认「最近3天」；热度模式保持其选项集的第一项
+  const preferred = currentChartType === 'hot' ? options[0][0] : '3d';
+  rangeSelect.value = options.some(([v]) => v === preferred) ? preferred : options[0][0];
   currentRange = rangeSelect.value;
 }
 
@@ -811,7 +813,7 @@ rangeSelect.addEventListener('change', () => {
 chartSelect.addEventListener('change', () => {
   currentChartType = chartSelect.value;
   // 'hot' 模式的 range 选项集合跟其它模式不同，先重建再 applyRange；
-  // 重建函数会把 currentRange 同步成新模式的第一项（hot → '2d'，其它 → '3d'）
+  // 重建函数会把 currentRange 同步成新模式默认项（hot → 选项集第一项，其它 → '3d'）
   rebuildRangeSelect();
   toggleChartDisplay();
   if (AUTOREFRESH_RANGES.has(currentRange)) startAutoRefresh();
