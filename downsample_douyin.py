@@ -58,12 +58,27 @@ elif Path(JSON_FILE).exists():
         raw_data = json.load(f)
 else:
     raw_data = []
+# raw 是否原本就有数据？append 之前记下来，用于决定降采样的来源
+# raw 为空是合法的"归档窗口被清空"语义（外部 archive 文件接管了旧数据），
+# 这种情况下 json 不能跟着归零 — 见步骤 2 的 elif 分支
+raw_had_data = bool(raw_data)
 raw_data.append(new_record)
 with open(RAW_FILE, "w", encoding="utf-8") as f:
     json.dump(raw_data, f, ensure_ascii=False, indent=2)
 
-# 2) 加载并降采样：始终从 raw_data 出发，保证 douyin.json 与 douyin-raw.json 一致
-data = raw_data
+# 2) 加载并降采样
+#   - raw 有历史：从 raw_data 出发，json 与 raw 保持一致
+#   - raw 为空（人为归档清空）：改从 JSON_FILE 现有数据出发，append new_record 后再降采样；
+#     这样 raw 清空时 json 不会跟着归零，raw 仍只写 new_record（不反向回填到 raw）
+if raw_had_data:
+    data = raw_data
+elif Path(JSON_FILE).exists():
+    with open(JSON_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data.append(new_record)
+else:
+    data = [new_record]
+
 if not data:
     with open(JSON_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, ensure_ascii=False, indent=2)
