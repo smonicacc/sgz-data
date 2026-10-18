@@ -30,8 +30,8 @@
 | [`fetch_user_posts.py`](fetch_user_posts.py) | 抓取抖音创作者最近帖子快照 + 写入 history |
 | [`fetch_xhs_topic.py`](fetch_xhs_topic.py) | 抓取小红书 5 个话题 `view_num`（TOPICS 列表写死在脚本里，详见 [xiaohongshu.md](xiaohongshu.md)） |
 | [`process.py`](process.py) | 把 `data.json` 的单点 `value` 按时间做分层归档（`data-raw.json` = 原始，`data.json` = 降采样后；env `RECORD_HOT_NUM` 非空时 record 顺带带 `hot_num` 字段，**两文件均写**，便于 `push_to_grafana.py` 回填 `qq_video_hot_num`）；同时维护 `data-hot-max.json`（all_time_max + today_max，跨 BJ 0 点重置 today） |
-| [`downsample_douyin.py`](downsample_douyin.py) | 把 `douyin.json` 的多字段记录按 BJ 时间分桶降采样：`<=3d` 全保留 / `3d<age<=7d` 按 4 小时桶（00/04/08/12/16/20）/ `>7d` 按天桶（BJ 0:00）；`douyin-raw.json` 全量、`douyin.json` 降采样后 |
-| [`downsample_xhs_topic.py`](downsample_xhs_topic.py) | 对 `xhs_topic.json` 套用与 douyin 相同的分桶策略（`<=3d` 全保留 / `3d~7d` 4 小时桶 / `>7d` 天桶）；`xhs_topic-raw.json` 全量、`xhs_topic.json` 每次从 raw 重建。`REBUILD_ONLY=1` 可只重建不 append |
+| [`downsample_douyin.py`](downsample_douyin.py) | 把 `douyin.json` 的多字段记录按 BJ 时间分桶降采样：`<=3d` 全保留 / `3d<age<=7d` 按 4 小时桶（00/04/08/12/16/20）/ `>7d` 按天桶（BJ 0:00）；`douyin-raw.json` 全量、`douyin.json` 降采样后；`douyin.json` 只基于自身现有内容 + 新记录增量降采样，永不从 raw 重建（手工回填的历史不会被覆盖） |
+| [`downsample_xhs_topic.py`](downsample_xhs_topic.py) | 对 `xhs_topic.json` 套用与 douyin 相同的分桶策略（`<=3d` 全保留 / `3d~7d` 4 小时桶 / `>7d` 天桶）；`xhs_topic-raw.json` 全量、`xhs_topic.json` 增量降采样（同上，永不从 raw 重建） |
 
 ### 2.1 抖音话题 HID（`cid`）的获取方式
 

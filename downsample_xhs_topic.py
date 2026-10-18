@@ -13,10 +13,12 @@
   记录按整条原样复制，不关心字段名：现有的 5 个 *_tag_view_num 以及以后新增
   的字段都会自动透传。
 
+xhs_topic.json 只基于它自己的现有内容 + 本次新记录做增量降采样，**永不从
+xhs_topic-raw.json 重建**：手工回填到 json 的历史不会被采集覆盖掉。
+xhs_topic-raw.json 单独 append-only 全量存档，两者互不覆盖。
+
 本次新记录从文件读取（与 downsample_douyin.py 相同）：
   NEW_RECORD_FILE    - 新记录 JSON 文件路径，默认 new_xhs_topic_record.json
-
-  REBUILD_ONLY=1 时跳过 append，只从 raw 重建 xhs_topic.json（首次迁移 / 手动修复）。
 
 文件路径可通过 env 覆盖：
   DATA_FILE      - 降采样输出文件，默认 xhs_topic.json
@@ -111,7 +113,7 @@ def append_and_downsample(
     json_file: Path = JSON_FILE,
     raw_file: Path = RAW_FILE,
 ) -> None:
-    """把 record 追加到 raw 全量存档，并从 raw 重建降采样后的 json。"""
+    """把 record 追加到 raw 全量存档，并对 json 做增量降采样。"""
     json_file = Path(json_file)
     raw_file = Path(raw_file)
 
@@ -123,32 +125,22 @@ def append_and_downsample(
         raw_data = _load(json_file, [])
     else:
         raw_data = []
-    # raw 是否原本就有数据？append 之前记下来，用于决定降采样的来源。
-    # raw 为空是合法的"归档窗口被清空"语义（外部 archive 文件接管了旧数据），
-    # 这种情况下 json 不能跟着归零。
-    raw_had_data = bool(raw_data)
     raw_data.append(record)
     _write(raw_file, raw_data)
 
-    # 2) 从 raw 重建降采样文件（幂等）
-    #   - raw 有历史：json 与 raw 保持一致
-    #   - raw 为空（人为归档清空）：改从 json 现有数据出发，append record 后再降采样
-    if raw_had_data:
-        data = raw_data
-    else:
-        data = _load(json_file, []) if json_file.exists() else []
+    # 2) 降采样：数据源是 json 自己 + 本次新记录，绝不从 raw 重建。
+    #    这样手工回填进 json 的历史不会被 raw 覆盖；json 不存在时（首次生成）
+    #    才用完整存档 raw_data（已含新记录）初始化。
+    if json_file.exists():
+        data = _load(json_file, [])
         data.append(record)
+    else:
+        data = list(raw_data)
 
     _write(json_file, downsample(data))
 
 
 def main() -> int:
-    if os.environ.get("REBUILD_ONLY", "").strip().lower() in ("1", "true", "yes"):
-        # 只从 raw 重建；raw 不存在时退回现有的降采样文件
-        data = _load(RAW_FILE, []) if RAW_FILE.exists() else _load(JSON_FILE, [])
-        _write(JSON_FILE, downsample(data))
-        return 0
-
     with open(NEW_RECORD_FILE, "r", encoding="utf-8") as f:
         new_record = json.load(f)
     append_and_downsample(new_record, JSON_FILE, RAW_FILE)

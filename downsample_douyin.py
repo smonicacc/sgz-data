@@ -9,6 +9,10 @@
   所有"天/小时"边界均按 UTC+8 计算（与 douyin.html 的 bucketizeFourHourClosest
   / bucketizeDayClosest 一致）。
 
+douyin.json 只基于它自己的现有内容 + 本次新记录做增量降采样，**永不从
+douyin-raw.json 重建**：手工回填到 json 的历史不会被采集覆盖掉的逻辑删除。
+douyin-raw.json 单独 append-only 全量存档，两者互不覆盖。
+
 本次新记录从文件读取（collect_data.yaml 的 "Append to douyin.json" step
 会先在 inline Python 里把本条 record 写成 JSON 文件，再调用本脚本）：
   NEW_RECORD_FILE    - 新记录 JSON 文件路径，默认 new_douyin_record.json
@@ -58,26 +62,19 @@ elif Path(JSON_FILE).exists():
         raw_data = json.load(f)
 else:
     raw_data = []
-# raw 是否原本就有数据？append 之前记下来，用于决定降采样的来源
-# raw 为空是合法的"归档窗口被清空"语义（外部 archive 文件接管了旧数据），
-# 这种情况下 json 不能跟着归零 — 见步骤 2 的 elif 分支
-raw_had_data = bool(raw_data)
 raw_data.append(new_record)
 with open(RAW_FILE, "w", encoding="utf-8") as f:
     json.dump(raw_data, f, ensure_ascii=False, indent=2)
 
-# 2) 加载并降采样
-#   - raw 有历史：从 raw_data 出发，json 与 raw 保持一致
-#   - raw 为空（人为归档清空）：改从 JSON_FILE 现有数据出发，append new_record 后再降采样；
-#     这样 raw 清空时 json 不会跟着归零，raw 仍只写 new_record（不反向回填到 raw）
-if raw_had_data:
-    data = raw_data
-elif Path(JSON_FILE).exists():
+# 2) 降采样：数据源是 douyin.json 自己 + 本次新记录，绝不从 raw 重建。
+#    这样手工回填进 json 的历史不会被 raw 覆盖；json 不存在时（首次生成）
+#    才用完整存档 raw_data（已含新记录）初始化。
+if Path(JSON_FILE).exists():
     with open(JSON_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
     data.append(new_record)
 else:
-    data = [new_record]
+    data = list(raw_data)
 
 if not data:
     with open(JSON_FILE, "w", encoding="utf-8") as f:
