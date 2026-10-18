@@ -4,7 +4,7 @@
 
 签名基于 [`xhshow`](https://pypi.org/project/xhshow/)（独立 PyPI 包，专做小红书 XYS_ + x-s-common 签名），不再手工拼 MD5+AES。
 
-数据累加文件是 `xhs_topic.json`，每次跑成功就 append 一条记录。脚本内一次跑 5 次 search：
+数据采用和 douyin 相同的双文件归档：`xhs_topic-raw.json` 为 append-only 全量存档，`xhs_topic.json` 是每次从 raw 重建的降采样视图（`<=3d` 全保留 / `3d~7d` 按 BJ 4 小时桶 / `>7d` 按天桶，由 [`downsample_xhs_topic.py`](downsample_xhs_topic.py) 处理）。每次跑成功就 append 一条记录。脚本内一次跑 5 次 search：
 
 | keyword       | topic_id                     | JSON key            |
 |---------------|------------------------------|---------------------|
@@ -69,7 +69,7 @@
 正常情况下：
 
 - stdout 单行 JSON：`{"ts": ..., "sgz_tag_view_num": N, "yqmr_tag_view_num": N, "fyzs_tag_view_num": N, "mzylyr_tag_view_num": N, "lyrmzy_tag_view_num": N}`
-- 仓库根目录的 `xhs_topic.json`（不存在则创建）追加一条对应记录
+- 仓库根目录的 `xhs_topic-raw.json`（不存在则创建）追加一条对应记录，并据此重建降采样后的 `xhs_topic.json`（同时把本条记录写到 `new_xhs_topic_record.json`，便于调试/单独重跑降采样）
 
 之后会跟 douyin 同步：受 `DOUYIN_INTERVAL_HOURS`（默认 4 小时）+ 5 分钟容差控制，由 `douyin_check` 步统一判断 due 才真正发请求——和 douyin 的间隔完全一致。
 
@@ -120,17 +120,25 @@ XHS_COOKIE="a1=...;web_session=...;webId=...;webBuild=...;..." python3 fetch_xhs
 
 | 退出码 | 含义 |
 |--------|------|
-| `0` | 成功（已 append 一条记录到 `xhs_topic.json`，5 个 topic 全 OK） |
+| `0` | 成功（已 append 一条记录到 `xhs_topic-raw.json` 并重建 `xhs_topic.json`，5 个 topic 全 OK） |
 | `1` | 业务错误（任一 topic：响应空 / view_num 无效 / topic_id 不匹配 / 名字不匹配 / 网络错） |
 | `2` | 环境错误（cookie 未设） |
 
-跑两次的话，`xhs_topic.json` 会变成：
+跑两次的话，`xhs_topic-raw.json` 会变成：
 
 ```json
 [
   {"ts": 1762492800, "sgz_tag_view_num": 461448567, "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ...},
   {"ts": 1762507200, "sgz_tag_view_num": 461512893, "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ...}
 ]
+```
+
+因为两条都在 3 天内，`xhs_topic.json` 此时与 raw 完全一致；超过 3 天后就开始按 4 小时桶、再往后按天桶收敛。
+
+手动只重建降采样文件（不追加新记录）：
+
+```bash
+REBUILD_ONLY=1 python3 downsample_xhs_topic.py
 ```
 
 ### 3.3 调试模式
@@ -185,9 +193,11 @@ XHS_COOKIE="a1=...;web_session=...;webId=...;webBuild=...;..." python3 fetch_xhs
 
 | 路径 | 说明 |
 |------|------|
-| `fetch_xhs_topic.py` | 主脚本（stdlib + `xhshow`），自己 append 到 `xhs_topic.json` |
+| `fetch_xhs_topic.py` | 主脚本（stdlib + `xhshow`），抓取后交给 `downsample_xhs_topic.py` 落盘 |
+| `downsample_xhs_topic.py` | 双文件归档：append 到 `xhs_topic-raw.json`，并从 raw 重建降采样后的 `xhs_topic.json` |
 | `.github/workflows/collect_data.yaml` | GitHub Actions 流水线（XHS 步骤挂在 douyin 后面，共享 `douyin_check` 的 due 判断和 `DOUYIN_INTERVAL_HOURS`） |
-| `xhs_topic.json` | 累积数据，JSON list，每条 `{"ts": ..., "sgz_tag_view_num": ..., "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ...}` |
+| `xhs_topic-raw.json` | 全量累积数据（append-only，不降采样），JSON list，每条 `{"ts": ..., "sgz_tag_view_num": ..., "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ...}` |
+| `xhs_topic.json` | 降采样视图（`<=3d` 全保留 / `3d~7d` 4 小时桶 / `>7d` 天桶），字段与 raw 相同 |
 
 ---
 

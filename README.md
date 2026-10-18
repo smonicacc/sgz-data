@@ -13,7 +13,7 @@
 | `data.json` / `data-raw.json` | 腾讯视频《尚公主》单点 `attent_num`（开启 `COLLECT_HOT_NUM` 时 record 顺带带 `hot_num`） | `{ts, value}`；开启 `COLLECT_HOT_NUM` 后额外带 `hot_num`（经 `process.py` 分层归档；两文件均带，便于 `push_to_grafana.py` 回填 `qq_video_hot_num`） |
 | `data-hot-max.json` | `hot_num` 历史 / 当日最大值（用于热度折线图参考线） | `{all_time_max_hot_num, all_time_max_ts, today_max_hot_num, today_max_ts, today_bj_date}`；`today_bj_date` 跨过 BJ 0 点时 `today_*` 自动重置为首次采集值 |
 | `douyin.json` / `douyin-raw.json` | 抖音话题 + 用户粉丝 | `{ts, sgz_follower_count, sgz_total_favorited, <alias>_douyin_tag_view_count, <alias>_douyin_tag_user_count}`；`douyin-raw.json` 全量、`douyin.json` 经 `downsample_douyin.py` BJ-时分桶降采样 |
-| `xhs_topic.json` | 小红书 5 个话题阅读量 | `{ts, sgz_tag_view_num, yqmr_tag_view_num, fyzs_tag_view_num, mzylyr_tag_view_num, lyrmzy_tag_view_num}` |
+| `xhs_topic.json` / `xhs_topic-raw.json` | 小红书 5 个话题阅读量 | `{ts, sgz_tag_view_num, yqmr_tag_view_num, fyzs_tag_view_num, mzylyr_tag_view_num, lyrmzy_tag_view_num}`；`xhs_topic-raw.json` 全量、`xhs_topic.json` 经 `downsample_xhs_topic.py` BJ-时分桶降采样 |
 | `data/user_posts.json` | 抖音创作者最近帖子快照 | `{fetched_at, aweme_list:[{aweme_id, statistics:{...}}]}` |
 | `data/user_posts_history.json` | 抖音创作者帖子历史 | `{aweme_id: [{ts, digg_count, comment_count, share_count}, ...]}` |
 | `delta.md` | 北京日期 vs 增量的人工表格 | — |
@@ -31,6 +31,7 @@
 | [`fetch_xhs_topic.py`](fetch_xhs_topic.py) | 抓取小红书 5 个话题 `view_num`（TOPICS 列表写死在脚本里，详见 [xiaohongshu.md](xiaohongshu.md)） |
 | [`process.py`](process.py) | 把 `data.json` 的单点 `value` 按时间做分层归档（`data-raw.json` = 原始，`data.json` = 降采样后；env `RECORD_HOT_NUM` 非空时 record 顺带带 `hot_num` 字段，**两文件均写**，便于 `push_to_grafana.py` 回填 `qq_video_hot_num`）；同时维护 `data-hot-max.json`（all_time_max + today_max，跨 BJ 0 点重置 today） |
 | [`downsample_douyin.py`](downsample_douyin.py) | 把 `douyin.json` 的多字段记录按 BJ 时间分桶降采样：`<=3d` 全保留 / `3d<age<=7d` 按 4 小时桶（00/04/08/12/16/20）/ `>7d` 按天桶（BJ 0:00）；`douyin-raw.json` 全量、`douyin.json` 降采样后 |
+| [`downsample_xhs_topic.py`](downsample_xhs_topic.py) | 对 `xhs_topic.json` 套用与 douyin 相同的分桶策略（`<=3d` 全保留 / `3d~7d` 4 小时桶 / `>7d` 天桶）；`xhs_topic-raw.json` 全量、`xhs_topic.json` 每次从 raw 重建。`REBUILD_ONLY=1` 可只重建不 append |
 
 ### 2.1 抖音话题 HID（`cid`）的获取方式
 
@@ -145,11 +146,11 @@ PY
 6. `Run fetch_douyin.py for each hashtag`（仅 `FORCE || due`，5 个话题循环，列表在 `collect_data.yaml` 的 `PAIRS` 数组里维护）
 7. `Append to douyin.json` — 在 inline Python 里构建单条 record（ts + sgz_follower/sgz_total_favorited + 各 alias 的 view/user_count），写到 `new_douyin_record.json`，再交给 [`downsample_douyin.py`](downsample_douyin.py) 处理：`douyin-raw.json` append-only 全量，`douyin.json` 按 BJ 时间分桶降采样（仅 `FORCE || due`）
 8. `Push douyin user profile to Grafana Cloud Prometheus`（`douyin-user`，仅 `FORCE || due`）
-9. `Fetch xiaohongshu topic view_num and append to xhs_topic.json`（仅 `FORCE || due`）
+9. `Fetch xiaohongshu topic view_num and append to xhs_topic.json`（仅 `FORCE || due`）— 抓取后交给 `downsample_xhs_topic.py`：`xhs_topic-raw.json` append-only 全量，`xhs_topic.json` 按 BJ 时间分桶降采样（与 douyin 同一套规则）
 10. `Push xiaohongshu topic view to Grafana Cloud Prometheus`（`xhs-topic`，仅 `FORCE || due`）
 11. `Commit and push updated data`（`DRY_RUN != 'true'`）
 
-`git add` 列表：`data.json data-raw.json data-hot-max.json douyin.json douyin-raw.json xhs_topic.json`。
+`git add` 列表：`data.json data-raw.json data-hot-max.json douyin.json douyin-raw.json xhs_topic.json xhs_topic-raw.json`。
 
 ---
 
