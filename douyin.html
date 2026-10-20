@@ -40,6 +40,35 @@
 .legend-item-all .marker::before,.legend-item-all .marker::after{display:none;}
 .legend-item-all .label{font-weight:500;}
 .legend-item-all.unselected .marker{background:#aaa !important;}
+/* ---- 最近作品表格（A+D）：每行一个作品 + "发布后时长" sparkline ---- */
+#recentControls{display:none;flex-direction:row;align-items:center;gap:24px;flex-wrap:wrap;font-family:sans-serif;font-size:16px;}
+#recentControls select{padding:6px 10px;font-size:16px;}
+#recentSummary{color:#666;font-size:14px;}
+#recentTableWrap{display:none;margin-top:8px;margin-bottom:24px;border:1px solid #d7d7e0;border-radius:8px;overflow:visible;background:#fff;}
+#recentTable{width:100%;border-collapse:separate;border-spacing:0;font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',Arial,sans-serif;font-size:15px;}
+#recentTable thead th{position:sticky;top:0;z-index:1;background:#f5f5fa;color:#444;font-weight:600;text-align:left;padding:10px 14px;border-bottom:1px solid #d7d7e0;white-space:nowrap;}
+#recentTable tbody td{padding:9px 14px;border-bottom:1px solid #eee;vertical-align:middle;}
+#recentTable tbody tr:last-child td{border-bottom:none;}
+#recentTable tbody tr:hover{background:#f8f9ff;}
+.recent-title{max-width:420px;color:#222;}
+.recent-title-main{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.recent-title-sub{display:none;color:#777;font-size:12px;margin-top:2px;font-variant-numeric:tabular-nums;}
+.recent-time{color:#555;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.recent-num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;color:#222;}
+#recentTable thead th.recent-num{text-align:right;}
+.recent-spark{width:220px;min-width:180px;padding-top:4px !important;padding-bottom:4px !important;}
+.recent-spark svg{display:block;width:200px;height:44px;}
+.recent-empty{color:#888;text-align:center;padding:28px 0 !important;}
+.recent-muted{color:#aaa;font-size:13px;}
+@media (max-width:760px){
+  .recent-title{max-width:170px;}
+  .recent-title-sub{display:block;}
+  .recent-time-col{display:none;}
+  .recent-spark{width:120px;min-width:100px;}
+  .recent-spark svg{width:110px;height:38px;}
+  #recentTable thead th,#recentTable tbody td{padding:7px 6px;}
+  .recent-24h-col{display:none;}
+}
 </style>
 </head>
 <body>
@@ -55,11 +84,11 @@
         <option value="user">&#127925;抖音话题参与人数</option>
         <option value="sgz">&#127925;尚公主抖音号</option>
         <option value="top10">&#127925;尚公主抖音-TOP10</option>
-        <option value="latest10">&#127925;尚公主抖音-最新10</option>
+        <option value="recent">&#127925;尚公主抖音-最近作品</option>
         <option value="xhs">&#128213;小红书话题浏览数</option>
       </select>
     </div>
-    <div class="toolbar-group">
+    <div class="toolbar-group" id="rangeGroup">
       <label for="rangeSelect">时间范围：</label>
       <select id="rangeSelect">
         <option value="3d" selected>最近3天</option>
@@ -72,16 +101,51 @@
       <span id="refreshStatus"></span>
     </div>
   </div>
+  <div id="recentControls">
+    <div class="toolbar-group">
+      <label for="recentDaysSelect">发布窗口：</label>
+      <select id="recentDaysSelect">
+        <option value="7" selected>最近 7 天发布的</option>
+        <option value="14">最近 14 天发布的</option>
+      </select>
+    </div>
+    <div class="toolbar-group">
+      <label for="recentCurveSelect">曲线时间：</label>
+      <select id="recentCurveSelect">
+        <option value="24">发布后 24 小时</option>
+        <option value="72" selected>发布后 72 小时</option>
+        <option value="168">发布后 7 天</option>
+      </select>
+    </div>
+    <span id="recentSummary"></span>
+  </div>
 </div>
 <div id="chart"></div>
 <div id="top10Legend"></div>
+<div id="recentTableWrap">
+  <table id="recentTable">
+    <thead>
+      <tr>
+        <th>作品</th>
+        <th class="recent-time-col">发布</th>
+        <th class="recent-num recent-24h-col" title="作品发布后约 24 小时时的点赞数；作品未满 24 小时或数据还没覆盖到 24 小时时显示占位文字">发布后24h赞</th>
+        <th class="recent-num">当前赞</th>
+        <th>发布后曲线</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
 <script>
 // ---- 状态 ----
 let currentRange = '3d';
-let currentMetric = 'view';  // 'view' = 抖音播放数(view_count)，'user' = 抖音参与人数(user_count)，'sgz' = 尚公主抖音号，'xhs' = 小红书话题浏览数(view_num)，'top10' = 抖音作品-点赞TOP10，'latest10' = 抖音作品-最新10
+let currentMetric = 'view';  // 'view' = 抖音播放数(view_count)，'user' = 抖音参与人数(user_count)，'sgz' = 尚公主抖音号，'xhs' = 小红书话题浏览数(view_num)，'top10' = 抖音作品-点赞TOP10，'recent' = 抖音作品-最近作品（表格 + 发布后时长 sparkline）
 let refreshTimer = null;
 let allData = [];
-let top10Data = {};  // {aweme_id: [{ts, digg_count, ...}, ...]} top10 / latest10 共用
+let top10Data = {};  // {aweme_id: [{ts, digg_count, ...}, ...]} top10 / recent 共用
+let metaData = {};   // {aweme_id: {desc, create_time, share_url}} recent 用
+let recentListDays = 7;       // 最近作品列表窗口（天）
+let recentCurveHours = 72;    // sparkline 横轴：发布后 N 小时
 let currentFiltered = [];
 let currentRangeObj = null;
 
@@ -122,21 +186,22 @@ const TOP10_ITEMS = [
   { awemeId: '7544404502763326746', name: '0831开机单人照' },
 ];
 
-// ---- LATEST10 配置：10 个最新作品（与 TOP10 同样的 {awemeId, name} 形状，具体值后续用户给）----
-const LATEST10_ITEMS = [
-  { awemeId: '7697963430037334193', name: '500万预约视频' },
-  { awemeId: '7697961173991378195', name: '500万预约雪地海报' },
-  { awemeId: '7697710989726223625', name: '预告新剪24秒' },
-  { awemeId: '7697634238824271147', name: '马车护头花絮' },
-  { awemeId: '7697555703904341298', name: '450万预约双人海报' },
-  { awemeId: '7697336857595579657', name: '定档花絮-一幕幕重现' },
-  { awemeId: '7697336410742852883', name: '定档花絮-升温' },
-  { awemeId: '7697336099026341139', name: '定档预告30秒片' },
-  { awemeId: '7697335475178745273', name: '定档海报' },
-  { awemeId: '7697333585769958719', name: '定档预告' },
-];
+// ---- 最近作品：可选的短名称覆盖（只用于已手工命名的老作品；新作品自动用 meta 里的 desc）----
+// 这是纯展示用的小映射，不再充当"要显示哪些作品"的白名单——列表由数据自动生成。
+const NAME_OVERRIDES = {
+  //'7697963430037334193': '500万预约视频',
+  //'7697961173991378195': '500万预约雪地海报',
+  //'7697710989726223625': '预告新剪24秒',
+  //'7697634238824271147': '马车护头花絮',
+  //'7697555703904341298': '450万预约双人海报',
+  //'7697336857595579657': '定档花絮-一幕幕重现',
+  //'7697336410742852883': '定档花絮-升温',
+  //'7697336099026341139': '定档预告30秒片',
+  //'7697335475178745273': '定档海报',
+  //'7697333585769958719': '定档预告',
+};
 
-// 保底调色板：跟 TOP10_COLORS_BY_AWEME 全部 18 色都不重（hash 散到的色不会跟已有 id 撞色）
+// 保底调色板：跟 TOP10_COLORS_BY_AWEME 全部 10 色都不重（hash 散到的色不会跟已有 id 撞色）
 // 取 Tailwind 700/800/900 系列更深一档的色（BY_AWEME 用 600/700，这里用 700/800/900）
 const TOP10_COLORS = [
   '#0369A1',  // sky
@@ -151,30 +216,20 @@ const TOP10_COLORS = [
   '#5B21B6',  // dark violet
 ];
 
-// TOP10/LATEST10 共享的全局 aweme_id → 颜色 映射（同一 id 在两个视图里同色）
-// 显式列出全部 19 个 id；未列入的 id 用 hash 散到 TOP10_COLORS 上（保底）
+// TOP10 的 aweme_id → 颜色 映射（最近作品表格不依赖颜色区分，所以只需要 top10 这 10 个）
+// 未列入的 id 用 hash 散到 TOP10_COLORS 上（保底）
 const TOP10_COLORS_BY_AWEME = {
-  // TOP10 的 10 个（Tailwind 600/700 亮色系，跟 TOP10_COLORS 保底调色板的 700/800/900 深色系不重）
-  '7675574770423050953': '#DC2626',  // red，TOP10[0]，也是 LATEST10[5]
+  // Tailwind 600/700 亮色系，跟 TOP10_COLORS 保底调色板的 700/800/900 深色系不重
+  '7675574770423050953': '#DC2626',  // red，TOP10[0]
   '7544398141043477769': '#16A34A',  // green，TOP10[1]
   '7621751828358880622': '#9333EA',  // purple，TOP10[2]
   '7591450498210419633': '#2563EB',  // blue，TOP10[3]
   '7518353962039561532': '#EA580C',  // orange，TOP10[4]
-  '7675334230276399793': '#0891B2',  // cyan，TOP10[5]，也是 LATEST10[6]
+  '7675334230276399793': '#0891B2',  // cyan，TOP10[5]
   '7602668375747214153': '#DB2777',  // pink，TOP10[6]
   '7565794188832132362': '#65A30D',  // lime，TOP10[7]
   '7566890534225890619': '#B45309',  // amber，TOP10[8]
   '7544404502763326746': '#475569',  // slate，TOP10[9]
-  '7697963430037334193': '#CA8A04',  // yellow，LATEST10[0]
-  '7697961173991378195': '#0D9488',  // teal，LATEST10[1]
-  '7697710989726223625': '#4F46E5',  // indigo，LATEST10[2]
-  '7697634238824271147': '#BE185D',  // rose，LATEST10[3]
-  '7697555703904341298': '#A21CAF',  // fuchsia，LATEST10[4]
-  '7697333585769958719': '#6D28D9',  // violet，LATEST10[7]
-  '7697335475178745273': '#047857',  // emerald，LATEST10[8]
-  '7697336099026341139': '#831843',  // dark pink，LATEST10[9]
-  '7697336410742852883': '#7C3AED',  // violet，LATEST10 新增（定档花絮-升温）
-  '7697336857595579657': '#0284C7',  // sky，LATEST10 新增（定档花絮-一幕幕重现）
 };
 
 // djb2 字符串 hash，让未列入的 aweme_id 也保持稳定颜色（同一 id → 同一色）
@@ -194,10 +249,9 @@ function getColorByAweme(awemeId) {
 }
 
 // ---- 通用：按当前指标返回要展示的 10 个作品 + series 列表 ----
-// top10 / latest10 都用静态常量指定（具体值见 TOP10_ITEMS / LATEST10_ITEMS）
+// 只有 top10 用静态常量指定；最近作品列表由数据自动生成（见 buildRecentItems）
 function getCurrentItems() {
   if (currentMetric === 'top10') return TOP10_ITEMS;
-  if (currentMetric === 'latest10') return LATEST10_ITEMS;
   return [];
 }
 function getDisplaySeries() {
@@ -210,13 +264,11 @@ function getDisplaySeries() {
 // 当前指标的图表标题（renderTop10Chart 引用）
 function getSeriesChartTitle() {
   if (currentMetric === 'top10') return '抖音作品-点赞TOP10';
-  if (currentMetric === 'latest10') return '抖音作品-最新10';
   return '';
 }
-// top10 / latest10 各用指定下标（不再统一用 0）
+// top10 默认勾选的下标（不再统一用 0）
 const DEFAULT_SELECTED_INDEX = {
   top10: 1,     // 七夕live图可爱*2
-  latest10: 5,  // 400万预约别看书了看我视频
 };
 
 // 默认勾选：只勾选当前指标对应下标的那一个，其他全 false
@@ -226,6 +278,145 @@ function getDefaultSelected() {
   const targetIdx = DEFAULT_SELECTED_INDEX[currentMetric] ?? 0;
   items.forEach((item, i) => { result[item.name] = i === targetIdx; });
   return result;
+}
+
+// ---- 最近作品（A+D）：自动列表 + "发布后时长" sparkline ----
+// A：每个作品一行，行内 sparkline；D：横轴 = 发布后小时数（不是绝对时间），
+// 这样发布 6 天的作品仍然展示它自己发布后头 72h 的曲线，也能和今天发的作品公平对比。
+const BJ_TIME_FMT = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hour12: false,
+});
+const COUNT_FMT = new Intl.NumberFormat('en-US');
+
+// 抖音 aweme_id 高 32 位是发布时间（秒）。用 BigInt 避免 19 位数字在 Number 下丢精度。
+function awemePublishTs(awemeId) {
+  try {
+    return Number(BigInt(awemeId) >> 32n);
+  } catch (e) {
+    return 0;
+  }
+}
+function formatBJTime(ts) {
+  return ts ? BJ_TIME_FMT.format(new Date(ts * 1000)) : '—';
+}
+function formatCount(n) {
+  return n == null ? '—' : COUNT_FMT.format(n);
+}
+function cleanDesc(desc) {
+  if (!desc) return '';
+  let s = String(desc).replace(/#[^\s#]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!s) s = String(desc).trim();
+  return s.length > 38 ? s.slice(0, 38) + '…' : s;
+}
+function getNameFor(awemeId) {
+  if (NAME_OVERRIDES[awemeId]) return NAME_OVERRIDES[awemeId];
+  const meta = metaData[awemeId] || {};
+  return cleanDesc(meta.desc) || `作品 ${String(awemeId).slice(-6)}`;
+}
+function buildRecentItems() {
+  const now = Date.now() / 1000;
+  const cutoff = now - recentListDays * 86400;
+  return Object.keys(top10Data)
+    .map(id => {
+      const meta = metaData[id] || {};
+      const publishTs = Number(meta.create_time) || awemePublishTs(id);
+      return {
+        awemeId: id,
+        name: getNameFor(id),
+        publishTs,
+        records: top10Data[id] || [],
+      };
+    })
+    .filter(it => it.publishTs >= cutoff && it.records.length > 0)
+    .sort((a, b) => b.publishTs - a.publishTs);
+}
+// 发布后 hours 小时的点赞数：取离目标时间最近的已到达快照；还没到就返回 null
+function valueAtAge(records, publishTs, hours) {
+  const target = publishTs + hours * 3600;
+  if (!records.length || records[records.length - 1].ts < target - 3600) return null;
+  let best = null;
+  let bestD = Infinity;
+  for (const r of records) {
+    if (r.ts > target + 2 * 3600) continue;
+    const d = Math.abs(r.ts - target);
+    if (d < bestD) { best = r; bestD = d; }
+  }
+  return best ? best.digg_count : null;
+}
+function _escHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+// 每行一个 sparkline：x = 发布后小时数，y 按该行自身 min/max 自适应（绝对值见"当前赞"列）
+function sparklineSvg(records, publishTs, windowHours) {
+  const W = 200, H = 44, PAD_X = 3, PAD_Y = 6;
+  const pts = records
+    .filter(r => r.ts >= publishTs - 3600)  // 容忍 1h 时钟偏差
+    .map(r => ({ age: Math.max(0, (r.ts - publishTs) / 3600), v: r.digg_count }))
+    .filter(p => p.age <= windowHours);
+  if (!pts.length) return '<span class="recent-muted">无数据</span>';
+  if (pts.length === 1) {
+    const px = PAD_X + (Math.min(pts[0].age, windowHours) / windowHours) * (W - PAD_X * 2);
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="仅 1 个数据点">` +
+      `<circle cx="${px.toFixed(1)}" cy="${(H / 2).toFixed(1)}" r="2.6" fill="#2563EB"></circle></svg>`;
+  }
+  const vals = pts.map(p => p.v);
+  let vMin = Math.min(...vals);
+  let vMax = Math.max(...vals);
+  if (vMax === vMin) { vMax = vMin + 1; }
+  const padV = (vMax - vMin) * 0.08;
+  vMin -= padV;
+  vMax += padV;
+  const x = age => PAD_X + (Math.min(age, windowHours) / windowHours) * (W - PAD_X * 2);
+  const y = v => PAD_Y + (1 - (v - vMin) / (vMax - vMin)) * (H - PAD_Y * 2);
+  const coords = pts.map(p => [x(p.age), y(p.v)]);
+  const line = coords.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)},${py.toFixed(1)}`).join(' ');
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  const area = `${line} L${last[0].toFixed(1)},${H - PAD_Y} L${first[0].toFixed(1)},${H - PAD_Y} Z`;
+  const firstV = pts[0].v;
+  const lastV = pts[pts.length - 1].v;
+  const summary = `发布后 ${pts[pts.length - 1].age.toFixed(1)}h：${formatCount(lastV)} 赞；区间 ${formatCount(firstV)} → ${formatCount(lastV)}`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${_escAttr(summary)}">` +
+    `<title>${_escHtml(summary)}</title>` +
+    `<line x1="${PAD_X}" y1="${H - PAD_Y}" x2="${W - PAD_X}" y2="${H - PAD_Y}" stroke="#eee" stroke-width="1"></line>` +
+    `<path d="${area}" fill="#2563EB" fill-opacity="0.10"></path>` +
+    `<path d="${line}" fill="none" stroke="#2563EB" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>` +
+    `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.6" fill="#2563EB"></circle>` +
+    `</svg>`;
+}
+function renderRecentTable() {
+  const tbody = document.querySelector('#recentTable tbody');
+  const summary = document.getElementById('recentSummary');
+  if (!tbody) return;
+  const items = buildRecentItems();
+  if (summary) summary.textContent = `共 ${items.length} 个作品 · 按发布时间倒序`;
+  if (!items.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="recent-empty">最近 ${recentListDays} 天没有发布作品</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = items.map(it => {
+    const recs = it.records.slice().sort((a, b) => a.ts - b.ts);
+    const current = recs.length ? recs[recs.length - 1].digg_count : null;
+    const at24 = valueAtAge(recs, it.publishTs, 24);
+    const ageHours = (Date.now() / 1000 - it.publishTs) / 3600;
+    const at24Cell = at24 == null
+      ? `<span class="recent-muted">${ageHours < 24 ? '未满 24h' : '数据未到'}</span>`
+      : _escHtml(formatCount(at24));
+    const meta = metaData[it.awemeId] || {};
+    const fullDesc = meta.desc || it.name;
+    const publishStr = formatBJTime(it.publishTs);
+    return `<tr>` +
+      `<td class="recent-title" title="${_escAttr(fullDesc)}">` +
+        `<div class="recent-title-main">${_escHtml(it.name)}</div>` +
+        `<div class="recent-title-sub">${_escHtml(publishStr)}</div>` +
+      `</td>` +
+      `<td class="recent-time recent-time-col">${_escHtml(publishStr)}</td>` +
+      `<td class="recent-num recent-24h-col">${at24Cell}</td>` +
+      `<td class="recent-num">${current == null ? '—' : _escHtml(formatCount(current))}</td>` +
+      `<td class="recent-spark">${sparklineSvg(recs, it.publishTs, recentCurveHours)}</td>` +
+      `</tr>`;
+  }).join('');
 }
 
 // 按当前指标算出 SERIES：view → view_count（原色），user → user_count（更鲜艳）；xhs → view_num（小红书字段无 douyin_ 中缀）
@@ -272,6 +463,11 @@ const chartDom = document.getElementById('chart');
 let subChart = echarts.init(chartDom);
 const rangeSelect = document.getElementById('rangeSelect');
 const refreshStatus = document.getElementById('refreshStatus');
+const rangeGroup = document.getElementById('rangeGroup');
+const recentControls = document.getElementById('recentControls');
+const recentTableWrap = document.getElementById('recentTableWrap');
+const recentDaysSelect = document.getElementById('recentDaysSelect');
+const recentCurveSelect = document.getElementById('recentCurveSelect');
 
 // ---- 时间范围解析 ----
 function parseRange(rangeValue) {
@@ -675,13 +871,13 @@ function syncTop10LegendHTML(selectedMap) {
 
 // HTML 图例点击 → 触发 ECharts 内部切换；legendselectchanged 事件会自动同步 HTML 状态 + 重算 Y 轴
 function toggleTop10Series(name) {
-  if (currentMetric !== 'top10' && currentMetric !== 'latest10') return;
+  if (currentMetric !== 'top10') return;
   subChart.dispatchAction({ type: 'legendToggleSelect', name });
 }
 
 // "全部" 切换：当前若不是 all-on → 全部勾选；若是 all-on → 恢复到默认（仅 DEFAULT_SELECTED_INDEX 项勾选）
 function toggleSelectAll() {
-  if (currentMetric !== 'top10' && currentMetric !== 'latest10') return;
+  if (currentMetric !== 'top10') return;
   const items = getCurrentItems();
   const allOn = items.every(item => lastSelected[item.name] !== false);
   const newSelected = {};
@@ -1153,16 +1349,16 @@ let lastSeriesData = [];
 let lastBarSeriesData = [];
 // sgz 图表的 legend 选中状态（独立于 view/user 的 selectedMap）
 let lastSgzSelected = { '总获赞': true, '粉丝数': true };
-// top10 / latest10 图表的缓存：分桶后的系列数据 + legend 选中状态
-// 初始默认：只勾选当前 items[0]，其他全 false（top10 初始化时只有 TOP10_ITEMS，latest10 在 loadData 里重置）
+// top10 图表的缓存：分桶后的系列数据 + legend 选中状态
+// 初始默认：只勾选 items[DEFAULT_SELECTED_INDEX]，其他全 false
 let lastSeriesBuckets = [];
 let lastSelected = getDefaultSelected();
 
 // 这样 ECharts 的 group 布局就不会把它算进去，可见 bar 能真正拿到 80% 槽宽
 // 直接重画整个图（notMerge: true），强制 ECharts 重新算布局
 function applyLegendFilter(selectedMap) {
-  if (currentMetric === 'top10' || currentMetric === 'latest10') {
-    // top10 / latest10：chart.series 永远包含全部 10 条（不让 ECharts 把 legend item 当孤儿处理掉），
+  if (currentMetric === 'top10') {
+    // top10：chart.series 永远包含全部 10 条（不让 ECharts 把 legend item 当孤儿处理掉），
     // legend 可见性由 legend.selected 控制，这里只重算 Y 轴范围 + 更新 legend.selected。
     // 不重画整个 chart，避免 ECharts 重新构造 legend 时把当前 unselected 的 item 移除。
     lastSelected = selectedMap;
@@ -1222,6 +1418,21 @@ function applyLegendFilter(selectedMap) {
 
 // ---- 应用当前范围 ----
 function applyRange() {
+  if (currentMetric === 'recent') {
+    // A+D：隐藏 ECharts 单图，显示"作品表格 + 发布后时长 sparkline"
+    chartDom.style.display = 'none';
+    hideTop10Legend();
+    rangeGroup.style.display = 'none';
+    recentControls.style.display = 'flex';
+    recentTableWrap.style.display = 'block';
+    renderRecentTable();
+    return;
+  }
+  chartDom.style.display = 'block';
+  rangeGroup.style.display = 'flex';
+  recentControls.style.display = 'none';
+  recentTableWrap.style.display = 'none';
+
   currentRangeObj = parseRange(currentRange);
   // 只按时间范围过滤，分桶交给 renderChart（折线/柱状各自决定）
   currentFiltered = allData.filter(r => {
@@ -1238,8 +1449,8 @@ function applyRange() {
     subChart.resize();
     renderSgzChart(currentFiltered, currentRangeObj, lastSgzSelected);
     hideTop10Legend();
-  } else if (currentMetric === 'top10' || currentMetric === 'latest10') {
-    // top10 / latest10 单图：图例改用下方 HTML grid 多行布局，chart 容器只需装下图表本身
+  } else if (currentMetric === 'top10') {
+    // top10 单图：图例改用下方 HTML grid 多行布局，chart 容器只需装下图表本身
     chartDom.style.height = '700px';
     subChart.resize();
     renderTop10Chart(currentRangeObj, lastSelected);
@@ -1271,15 +1482,26 @@ function stopAutoRefresh() {
 
 // ---- 数据加载 ----
 async function loadData() {
-  if (currentMetric === 'top10' || currentMetric === 'latest10') {
-    // top10 / latest10 共用数据源：{aweme_id: records[]}，加载到 top10Data（不写入 allData）
-    const res = await fetch('./data/user_posts_history.json?t=' + Date.now());
-    top10Data = await res.json();
-    // 如果 lastSelected 跟当前 items 对不上（首次进入 / 切换指标），重置为默认
-    const items = getCurrentItems();
-    const needReset = items.length === 0 || items.some(it => !(it.name in lastSelected));
-    if (needReset) {
-      lastSelected = getDefaultSelected();
+  if (currentMetric === 'top10' || currentMetric === 'recent') {
+    // top10 / recent 共用数据源：{aweme_id: records[]}，加载到 top10Data（不写入 allData）
+    const histUrl = './data/user_posts_history.json?t=' + Date.now();
+    if (currentMetric === 'recent') {
+      // recent 额外加载 meta（标题 + 发布时间）；文件缺失时降级到 id 推导
+      const [histRes, metaRes] = await Promise.all([
+        fetch(histUrl),
+        fetch('./data/user_posts_meta.json?t=' + Date.now()).catch(() => null),
+      ]);
+      top10Data = await histRes.json();
+      metaData = (metaRes && metaRes.ok) ? await metaRes.json() : {};
+    } else {
+      const res = await fetch(histUrl);
+      top10Data = await res.json();
+      // 如果 lastSelected 跟当前 items 对不上（首次进入 / 切换指标），重置为默认
+      const items = getCurrentItems();
+      const needReset = items.length === 0 || items.some(it => !(it.name in lastSelected));
+      if (needReset) {
+        lastSelected = getDefaultSelected();
+      }
     }
   } else {
     // xhs 指标走单独的 xhs_topic.json（字段名 {prefix}_tag_view_num，无 douyin_ 中缀）
@@ -1294,8 +1516,23 @@ async function loadData() {
 const chartSelect = document.getElementById('chartSelect');
 chartSelect.addEventListener('change', () => {
   currentMetric = chartSelect.value;
-  // 切换指标时数据源可能变（xhs 走 xhs_topic.json，其他走 douyin.json），重新加载
+  // recent 不依赖全局时间范围，始终自动刷新；其他指标沿用"只有最近 3 天自动刷新"
+  if (currentMetric === 'recent' || currentRange === '3d') {
+    startAutoRefresh();
+  } else {
+    stopAutoRefresh();
+  }
+  // 切换指标时数据源可能变（recent 走 user_posts_history.json，xhs 走 xhs_topic.json，其他走 douyin.json），重新加载
   loadData();
+});
+
+recentDaysSelect.addEventListener('change', () => {
+  recentListDays = parseInt(recentDaysSelect.value, 10) || 7;
+  if (currentMetric === 'recent') renderRecentTable();
+});
+recentCurveSelect.addEventListener('change', () => {
+  recentCurveHours = parseInt(recentCurveSelect.value, 10) || 72;
+  if (currentMetric === 'recent') renderRecentTable();
 });
 
 rangeSelect.addEventListener('change', () => {

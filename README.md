@@ -15,7 +15,8 @@
 | `douyin.json` / `douyin-raw.json` | 抖音话题 + 用户粉丝 | `{ts, sgz_follower_count, sgz_total_favorited, <alias>_douyin_tag_view_count, <alias>_douyin_tag_user_count}`；`douyin-raw.json` 全量、`douyin.json` 经 `downsample_douyin.py` BJ-时分桶降采样 |
 | `xhs_topic.json` / `xhs_topic-raw.json` | 小红书 5 个话题阅读量 | `{ts, sgz_tag_view_num, yqmr_tag_view_num, fyzs_tag_view_num, mzylyr_tag_view_num, lyrmzy_tag_view_num}`；`xhs_topic-raw.json` 全量、`xhs_topic.json` 经 `downsample_xhs_topic.py` BJ-时分桶降采样 |
 | `data/user_posts.json` | 抖音创作者最近帖子快照 | `{fetched_at, aweme_list:[{aweme_id, statistics:{...}}]}` |
-| `data/user_posts_history.json` | 抖音创作者帖子历史 | `{aweme_id: [{ts, digg_count, comment_count, share_count}, ...]}` |
+| `data/user_posts_history.json` | 抖音创作者帖子历史（public 展示用） | `{aweme_id: [{ts, digg_count}, ...]}`；由 private 仓库的 `downsample_history.py` 增量维护（以现有文件为基底 append raw 新快照，不从 raw 重建），保留 pinned TOP10 + 最近 `LIST_DAYS` 天发布的作品 |
+| `data/user_posts_meta.json` | 最近作品的标题 / 发布时间元数据 | `{aweme_id: {desc, create_time, share_url}}`；`douyin.html` 的"最近作品"表格用它自动生成作品列表和标题 |
 | `delta.md` | 北京日期 vs 增量的人工表格 | — |
 
 每条记录按时间累积，append-only；任何脚本出错都不会回退既有数据。
