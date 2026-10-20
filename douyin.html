@@ -40,6 +40,22 @@
 .legend-item-all .marker::before,.legend-item-all .marker::after{display:none;}
 .legend-item-all .label{font-weight:500;}
 .legend-item-all.unselected .marker{background:#aaa !important;}
+/* ---- 抖音话题图例：固定两行（顺序由 JS 的 TOPIC_LEGEND_ROWS 决定），覆盖在折线图和柱状图之间 ---- */
+#chartWrap{position:relative;}
+#topicLegend{display:none;position:absolute;left:50%;transform:translateX(-50%);top:435px;z-index:2;width:max-content;background:#f5f5fa;border:1px solid #c9c9d6;border-radius:6px;padding:12px 20px;font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei','微软雅黑',Arial,sans-serif;max-width:calc(100% - 20px);}
+.topic-legend-row{display:flex;align-items:center;justify-content:center;gap:18px 16px;flex-wrap:nowrap;}
+.topic-legend-row + .topic-legend-row{margin-top:18px;}
+.topic-legend-row .legend-item{align-items:center;padding:8px 6px;font-size:15px;line-height:1.3;}
+.topic-legend-row .legend-item .label{white-space:nowrap;word-break:normal;}
+.topic-legend-row .legend-item .marker{margin-top:0;}
+@media (max-width:760px){
+  /* 窄屏图例改为图表下方正常流式排列，避免两行/多行覆盖柱状图标题 */
+  #topicLegend{position:static;left:auto;right:auto;transform:none;top:auto;margin:10px 0 0;width:auto;max-width:100%;padding:10px 12px;}
+  .topic-legend-row{gap:18px 16px;flex-wrap:wrap;}
+  .topic-legend-row .legend-item{padding:8px 6px;}
+  .topic-legend-row + .topic-legend-row{margin-top:18px;}
+  .topic-legend-row .legend-item .marker{width:16px;}
+}
 /* ---- 最近作品表格（A+D）：每行一个作品 + "发布后时长" sparkline ---- */
 #recentControls{display:none;flex-direction:row;align-items:center;gap:24px;flex-wrap:wrap;font-family:sans-serif;font-size:16px;}
 #recentControls select{padding:6px 10px;font-size:16px;}
@@ -120,7 +136,10 @@
     <span id="recentSummary"></span>
   </div>
 </div>
-<div id="chart"></div>
+<div id="chartWrap">
+  <div id="chart"></div>
+  <div id="topicLegend"></div>
+</div>
 <div id="top10Legend"></div>
 <div id="recentTableWrap">
   <table id="recentTable">
@@ -149,11 +168,13 @@ let recentCurveHours = 72;    // sparkline 横轴：发布后 N 小时
 let currentFiltered = [];
 let currentRangeObj = null;
 
-// ---- 系列基础配置：5 条话题，前缀决定字段名 ----
+// ---- 系列基础配置：9 条抖音话题，前缀决定字段名 ----
 // 播放数用原色，参与人数用更鲜艳的色以在白底区分
 // 前缀对应 data/douyin.json 里的 {prefix}_douyin_tag_{view_count|user_count} 字段名
 //   yqmr → #昀牵孟绕；sgz → #尚公主；fyzs → #扶摇直尚
 //   mzylyr → #孟子义李昀锐；lyrmzy → #李昀锐孟子义
+//   mzy → #孟子义；lyr → #李昀锐；mwy → #暮晚摇；ys → #言尚
+// 后 4 个只有抖音数据，没有小红书话题数据（douyinOnly），xhs 视图会跳过
 const SERIES_BASE = [
   { name: '#昀牵孟绕', prefix: 'yqmr',
     viewColor: '#7D4698', viewBarColor: '#B197C4',
@@ -170,6 +191,25 @@ const SERIES_BASE = [
   { name: '#李昀锐孟子义', prefix: 'lyrmzy',
     viewColor: '#EE2E84', viewBarColor: '#FECDD3',  // Tailwind rose-600 / rose-200（rose 比 pink 红更多/紫更少，更"粉"）
     userColor: '#DB2777', userBarColor: '#F472B6' }, // Tailwind pink-600 / pink-400
+  // 以下 4 个暂时只在抖音视图展示；小红书视图等数据稳定后再加
+  { name: '#孟子义', prefix: 'mzy', douyinOnly: true,
+    viewColor: '#EA580C', viewBarColor: '#FDBA74',
+    userColor: '#C2410C', userBarColor: '#FB923C' },
+  { name: '#李昀锐', prefix: 'lyr', douyinOnly: true,
+    viewColor: '#0891B2', viewBarColor: '#67E8F9',
+    userColor: '#0E7490', userBarColor: '#22D3EE' },
+  { name: '#暮晚摇', prefix: 'mwy', douyinOnly: true,
+    viewColor: '#CA8A04', viewBarColor: '#FDE047',
+    userColor: '#A16207', userBarColor: '#FACC15' },
+  { name: '#言尚', prefix: 'ys', douyinOnly: true,
+    viewColor: '#64748B', viewBarColor: '#CBD5E1',
+    userColor: '#475569', userBarColor: '#94A3B8' },
+];
+
+// 抖音话题图例的固定两行顺序（xhs 视图只有前 5 个话题，缺失项会自动过滤）
+const TOPIC_LEGEND_ROWS = [
+  ['#尚公主', '#扶摇直尚', '#暮晚摇', '#言尚'],
+  ['#昀牵孟绕', '#孟子义李昀锐', '#李昀锐孟子义', '#孟子义', '#李昀锐'],
 ];
 
 // ---- TOP10 配置：10 个作品 + 10 个高对比度色（白底明显）----
@@ -422,7 +462,8 @@ function renderRecentTable() {
 // 按当前指标算出 SERIES：view → view_count（原色），user → user_count（更鲜艳）；xhs → view_num（小红书字段无 douyin_ 中缀）
 function getSeries() {
   if (currentMetric === 'xhs') {
-    return SERIES_BASE.map(s => ({
+    // 只有原先的 5 个话题有小红书数据；抖音单平台话题跳过
+    return SERIES_BASE.filter(s => !s.douyinOnly).map(s => ({
       name: s.name,
       field: `${s.prefix}_tag_view_num`,
       color: s.viewColor,
@@ -437,6 +478,41 @@ function getSeries() {
     color: isUser ? s.userColor : s.viewColor,
     barColor: isUser ? s.userBarColor : s.viewBarColor,
   }));
+}
+
+// ---- 抖音话题自定义图例：固定两行，按 TOPIC_LEGEND_ROWS 的顺序渲染 ----
+// ECharts 自带图例只能按宽度自动换行，无法指定“第一行这 4 个、第二行那 5 个”；
+// 这里隐藏 ECharts 图例，用 HTML 覆盖在折线图和柱状图之间，点击时仍然通过
+// dispatchAction 切换 ECharts 内部的 legend 状态。
+function renderTopicLegend(selectedMap = {}) {
+  const el = document.getElementById('topicLegend');
+  if (!el) return;
+  if (currentMetric !== 'view' && currentMetric !== 'user') {
+    el.style.display = 'none';
+    return;
+  }
+  const byName = {};
+  getSeries().forEach(s => { byName[s.name] = s; });
+  const rows = TOPIC_LEGEND_ROWS
+    .map(row => row.filter(name => byName[name]).map(name => {
+      const s = byName[name];
+      const cls = selectedMap[name] === false ? ' unselected' : '';
+      return `<div class="legend-item${cls}" onclick="toggleTopicSeries('${_escAttr(name)}')">` +
+        `<span class="marker" style="color:${s.color}"></span>` +
+        `<span class="label">${_escHtml(name)}</span>` +
+        `</div>`;
+    }).join(''))
+    .filter(row => row);
+  el.innerHTML = rows.map(row => `<div class="topic-legend-row">${row}</div>`).join('');
+  el.style.display = rows.length ? 'block' : 'none';
+}
+function hideTopicLegend() {
+  const el = document.getElementById('topicLegend');
+  if (el) el.style.display = 'none';
+}
+function toggleTopicSeries(name) {
+  if (currentMetric !== 'view' && currentMetric !== 'user') return;
+  subChart.dispatchAction({ type: 'legendToggleSelect', name });
 }
 
 // 图表元信息：标题随指标变（Y 轴单位按数据量级自动选，不在这里硬绑）
@@ -1029,17 +1105,22 @@ function renderTop10Chart(range, selectedMap = {}) {
 
 // ---- 折线 + 柱状图渲染（同一 chart，两个 grid）----
 function renderChart(baseFiltered, range, selectedMap = {
-  '#昀牵孟绕': true,
-  '#尚公主': false,
+  '#尚公主': true,
+  '#昀牵孟绕': false,
   '#扶摇直尚': false,
   '#孟子义李昀锐': false,
   '#李昀锐孟子义': false,
+  '#孟子义': false,
+  '#李昀锐': false,
+  '#暮晚摇': false,
+  '#言尚': false,
 }) {
   if (!baseFiltered.length) {
     subChart.clear();
     subChart.setOption({
       title: { text: getChartMeta().lineTitle, left: 'center', subtext: '该时间范围内无数据' },
     });
+    hideTopicLegend();
     return;
   }
 
@@ -1181,20 +1262,22 @@ function renderChart(baseFiltered, range, selectedMap = {
     animation: false,
     title: [
       { text: getChartMeta().lineTitle, left: 'center', top: 5 },
-      { text: getChartMeta().barTitle, left: 'center', top: 515 },
+      { text: getChartMeta().barTitle, left: 'center', top: 570 },
     ],
     legend: {
-      top: 445,
+      // view/user 用下方 #topicLegend 的 HTML 两行布局；xhs 仍用 ECharts 自带图例
+      show: currentMetric === 'xhs',
+      top: 435,
       left: 'center',
       data: getSeries().map(s => s.name),
-      textStyle: { fontSize: 15 },
+      textStyle: { fontSize: 14 },
       // 背景 + 浅边框让 legend 区视觉上突出，引导用户点击
       backgroundColor: '#f5f5fa',
       borderColor: '#c9c9d6',
       borderWidth: 1,
       borderRadius: 6,
-      padding: [14, 24],
-      itemGap: 24,
+      padding: [10, 18],
+      itemGap: 18,
       itemWidth: 18,
       itemHeight: 12,
       selected: selectedMap,
@@ -1229,7 +1312,7 @@ function renderChart(baseFiltered, range, selectedMap = {
     },
     grid: [
       { left: 70, right: 30, top: 55, height: 290 },   // 折线（自带 X 轴在底部）
-      { left: 70, right: 30, top: 560, height: 280 },  // 柱状（自带 X 轴在底部）
+      { left: 70, right: 30, top: 615, height: 280 },  // 柱状（自带 X 轴在底部）
     ],
     xAxis: [
       {
@@ -1340,6 +1423,13 @@ function renderChart(baseFiltered, range, selectedMap = {
       })(),
     ],
   }, true);
+
+  // view/user：显示固定两行的 HTML 图例；xhs：用 ECharts 自带图例
+  if (currentMetric === 'view' || currentMetric === 'user') {
+    renderTopicLegend(selectedMap);
+  } else {
+    hideTopicLegend();
+  }
 }
 
 // ---- legend 点击 → 折线和柱状两个 Y 轴范围都跟着所选系列自适应 ----
@@ -1422,6 +1512,7 @@ function applyRange() {
     // A+D：隐藏 ECharts 单图，显示"作品表格 + 发布后时长 sparkline"
     chartDom.style.display = 'none';
     hideTop10Legend();
+    hideTopicLegend();
     rangeGroup.style.display = 'none';
     recentControls.style.display = 'flex';
     recentTableWrap.style.display = 'block';
@@ -1449,14 +1540,16 @@ function applyRange() {
     subChart.resize();
     renderSgzChart(currentFiltered, currentRangeObj, lastSgzSelected);
     hideTop10Legend();
+    hideTopicLegend();
   } else if (currentMetric === 'top10') {
     // top10 单图：图例改用下方 HTML grid 多行布局，chart 容器只需装下图表本身
     chartDom.style.height = '700px';
     subChart.resize();
     renderTop10Chart(currentRangeObj, lastSelected);
     renderTop10Legend(lastSelected);
+    hideTopicLegend();
   } else {
-    chartDom.style.height = '930px';
+    chartDom.style.height = '1000px';
     subChart.resize();
     renderChart(currentFiltered, currentRangeObj);
     hideTop10Legend();

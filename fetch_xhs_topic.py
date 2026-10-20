@@ -80,6 +80,26 @@ TOPICS: list[dict[str, str]] = [
         "topic_id": "65a6ad41000000003100d0fa",
         "key":      "lyrmzy_tag_view_num",
     },
+    {
+        "keyword":  "孟子义",
+        "topic_id": "5d1ef46f0000000018019715",
+        "key":      "mzy_tag_view_num",
+    },
+    {
+        "keyword":  "李昀锐",
+        "topic_id": "5cc1c18d000000000e020b6d",
+        "key":      "lyr_tag_view_num",
+    },
+    {
+        "keyword":  "暮晚摇",
+        "topic_id": "65f6a1f4000000000201a463",
+        "key":      "mwy_tag_view_num",
+    },
+    {
+        "keyword":  "言尚",
+        "topic_id": "6319d3a80000000001002f8e",
+        "key":      "ys_tag_view_num",
+    },
 ]
 
 # macOS Python ships without a current CA bundle; allow opting out.
