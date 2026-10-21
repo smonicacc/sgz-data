@@ -4,7 +4,7 @@
 
 签名基于 [`xhshow`](https://pypi.org/project/xhshow/)（独立 PyPI 包，专做小红书 XYS_ + x-s-common 签名），不再手工拼 MD5+AES。
 
-数据采用和 douyin 相同的双文件归档：`xhs_topic-raw.json` 为 append-only 全量存档，`xhs_topic.json` 是基于自身现有内容 + 新记录做增量降采样的视图（`<=3d` 全保留 / `3d~7d` 按 BJ 4 小时桶 / `>7d` 按天桶，由 [`downsample_xhs_topic.py`](downsample_xhs_topic.py) 处理），永不从 raw 重建，手工回填进 json 的历史不会被覆盖。每次跑成功就 append 一条记录。脚本内一次跑 5 次 search：
+数据采用和 douyin 相同的双文件归档：`xhs_topic-raw.json` 为 append-only 全量存档，`xhs_topic.json` 是基于自身现有内容 + 新记录做增量降采样的视图（`<=3d` 全保留 / `3d~7d` 按 BJ 4 小时桶 / `>7d` 按天桶，由 [`downsample_xhs_topic.py`](downsample_xhs_topic.py) 处理），永不从 raw 重建，手工回填进 json 的历史不会被覆盖。每次跑成功就 append 一条记录。脚本内一次跑 9 次 search：
 
 | keyword       | topic_id                     | JSON key            |
 |---------------|------------------------------|---------------------|
@@ -13,8 +13,12 @@
 | 扶摇直尚       | `67d0f2b3000000000401ed01`   | `fyzs_tag_view_num` |
 | 孟子义李昀锐   | `65a62cad000000003f03df2c`   | `mzylyr_tag_view_num` |
 | 李昀锐孟子义   | `65a6ad41000000003100d0fa`   | `lyrmzy_tag_view_num` |
+| 孟子义         | `5d1ef46f0000000018019715`   | `mzy_tag_view_num`  |
+| 李昀锐         | `5cc1c18d000000000e020b6d`   | `lyr_tag_view_num`  |
+| 暮晚摇         | `65f6a1f4000000000201a463`   | `mwy_tag_view_num`  |
+| 言尚           | `6319d3a80000000001002f8e`   | `ys_tag_view_num`   |
 
-5 个 `view_num` 写在同一条记录里：`{ts, sgz_tag_view_num, yqmr_tag_view_num, fyzs_tag_view_num, mzylyr_tag_view_num, lyrmzy_tag_view_num}`。任一 topic 校验失败（topic_id 不匹配 / view_num 无效 / 网络错）就**整次运行 abort**，不写入部分数据。
+9 个 `view_num` 写在同一条记录里：`{ts, sgz_tag_view_num, yqmr_tag_view_num, fyzs_tag_view_num, mzylyr_tag_view_num, lyrmzy_tag_view_num, mzy_tag_view_num, lyr_tag_view_num, mwy_tag_view_num, ys_tag_view_num}`。任一 topic 校验失败（topic_id 不匹配 / view_num 无效 / 网络错）就**整次运行 abort**，不写入部分数据。
 
 ---
 
@@ -68,7 +72,7 @@
 
 正常情况下：
 
-- stdout 单行 JSON：`{"ts": ..., "sgz_tag_view_num": N, "yqmr_tag_view_num": N, "fyzs_tag_view_num": N, "mzylyr_tag_view_num": N, "lyrmzy_tag_view_num": N}`
+- stdout 单行 JSON：`{"ts": ..., "sgz_tag_view_num": N, "yqmr_tag_view_num": N, "fyzs_tag_view_num": N, "mzylyr_tag_view_num": N, "lyrmzy_tag_view_num": N, "mzy_tag_view_num": N, "lyr_tag_view_num": N, "mwy_tag_view_num": N, "ys_tag_view_num": N}`
 - 仓库根目录的 `xhs_topic-raw.json`（不存在则创建）追加一条对应记录，并据此重建降采样后的 `xhs_topic.json`（同时把本条记录写到 `new_xhs_topic_record.json`，便于调试/单独重跑降采样）
 
 之后会跟 douyin 同步：受 `DOUYIN_INTERVAL_HOURS`（默认 4 小时）+ 5 分钟容差控制，由 `douyin_check` 步统一判断 due 才真正发请求——和 douyin 的间隔完全一致。
@@ -108,19 +112,23 @@ XHS_COOKIE="a1=...;web_session=...;webId=...;webBuild=...;..." python3 fetch_xhs
 '扶摇直尚' (67d0f2b3000000000401ed01) → fyzs_tag_view_num=...
 '孟子义李昀锐' (65a62cad000000003f03df2c) → mzylyr_tag_view_num=...
 '李昀锐孟子义' (65a6ad41000000003100d0fa) → lyrmzy_tag_view_num=...
+'孟子义' (5d1ef46f0000000018019715) → mzy_tag_view_num=...
+'李昀锐' (5cc1c18d000000000e020b6d) → lyr_tag_view_num=...
+'暮晚摇' (65f6a1f4000000000201a463) → mwy_tag_view_num=...
+'言尚' (6319d3a80000000001002f8e) → ys_tag_view_num=...
 ```
 
 期望 stdout（一行 JSON）：
 
 ```json
-{"ts": 1762492800, "sgz_tag_view_num": 461448567, "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ...}
+{"ts": 1762492800, "sgz_tag_view_num": 461448567, "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ..., "mzy_tag_view_num": ..., "lyr_tag_view_num": ..., "mwy_tag_view_num": ..., "ys_tag_view_num": ...}
 ```
 
 退出码：
 
 | 退出码 | 含义 |
 |--------|------|
-| `0` | 成功（已 append 一条记录到 `xhs_topic-raw.json` 并重建 `xhs_topic.json`，5 个 topic 全 OK） |
+| `0` | 成功（已 append 一条记录到 `xhs_topic-raw.json` 并重建 `xhs_topic.json`，9 个 topic 全 OK） |
 | `1` | 业务错误（任一 topic：响应空 / view_num 无效 / topic_id 不匹配 / 名字不匹配 / 网络错） |
 | `2` | 环境错误（cookie 未设） |
 
@@ -128,8 +136,8 @@ XHS_COOKIE="a1=...;web_session=...;webId=...;webBuild=...;..." python3 fetch_xhs
 
 ```json
 [
-  {"ts": 1762492800, "sgz_tag_view_num": 461448567, "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ...},
-  {"ts": 1762507200, "sgz_tag_view_num": 461512893, "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ...}
+  {"ts": 1762492800, "sgz_tag_view_num": 461448567, "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ..., "mzy_tag_view_num": ..., "lyr_tag_view_num": ..., "mwy_tag_view_num": ..., "ys_tag_view_num": ...},
+  {"ts": 1762507200, "sgz_tag_view_num": 461512893, "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ..., "mzy_tag_view_num": ..., "lyr_tag_view_num": ..., "mwy_tag_view_num": ..., "ys_tag_view_num": ...}
 ]
 ```
 
@@ -190,7 +198,7 @@ XHS_COOKIE="a1=...;web_session=...;webId=...;webBuild=...;..." python3 fetch_xhs
 | `fetch_xhs_topic.py` | 主脚本（stdlib + `xhshow`），抓取后交给 `downsample_xhs_topic.py` 落盘 |
 | `downsample_xhs_topic.py` | 双文件归档：append 到 `xhs_topic-raw.json`，并对 `xhs_topic.json` 做增量降采样（不从 raw 重建） |
 | `.github/workflows/collect_data.yaml` | GitHub Actions 流水线（XHS 步骤挂在 douyin 后面，共享 `douyin_check` 的 due 判断和 `DOUYIN_INTERVAL_HOURS`） |
-| `xhs_topic-raw.json` | 全量累积数据（append-only，不降采样），JSON list，每条 `{"ts": ..., "sgz_tag_view_num": ..., "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ...}` |
+| `xhs_topic-raw.json` | 全量累积数据（append-only，不降采样），JSON list，每条 `{"ts": ..., "sgz_tag_view_num": ..., "yqmr_tag_view_num": ..., "fyzs_tag_view_num": ..., "mzylyr_tag_view_num": ..., "lyrmzy_tag_view_num": ..., "mzy_tag_view_num": ..., "lyr_tag_view_num": ..., "mwy_tag_view_num": ..., "ys_tag_view_num": ...}` |
 | `xhs_topic.json` | 降采样视图（`<=3d` 全保留 / `3d~7d` 4 小时桶 / `>7d` 天桶），字段与 raw 相同 |
 
 ---
@@ -219,6 +227,10 @@ python3 push_to_grafana.py xhs-topic --record-file xhs_topic.json --max-age-days
 | `fyzs_tag_view_num`  | `xhs_topic_view_count` | `tag=fyzs` |
 | `mzylyr_tag_view_num` | `xhs_topic_view_count` | `tag=mzylyr` |
 | `lyrmzy_tag_view_num` | `xhs_topic_view_count` | `tag=lyrmzy` |
+| `mzy_tag_view_num` | `xhs_topic_view_count` | `tag=mzy` |
+| `lyr_tag_view_num` | `xhs_topic_view_count` | `tag=lyr` |
+| `mwy_tag_view_num` | `xhs_topic_view_count` | `tag=mwy` |
+| `ys_tag_view_num` | `xhs_topic_view_count` | `tag=ys` |
 
 全部 metric 还会自动带上 `job=xhs_collector` 默认标签。标签 `tag` 与 `douyin_tag_view_count` / `douyin_tag_user_count` 对齐，dashboard 里可以并列比对同主题的跨平台数据。
 

@@ -121,8 +121,9 @@
     <div class="toolbar-group">
       <label for="recentDaysSelect">发布窗口：</label>
       <select id="recentDaysSelect">
-        <option value="7" selected>最近 7 天发布的</option>
-        <option value="14">最近 14 天发布的</option>
+        <option value="7" selected>最近 7 天发布</option>
+        <option value="14">最近 14 天发布</option>
+        <option value="since">定档日起（10/17）</option>
       </select>
     </div>
     <div class="toolbar-group">
@@ -131,6 +132,13 @@
         <option value="24">发布后 24 小时</option>
         <option value="72" selected>发布后 72 小时</option>
         <option value="168">发布后 7 天</option>
+      </select>
+    </div>
+    <div class="toolbar-group">
+      <label for="recentSortSelect">排序：</label>
+      <select id="recentSortSelect">
+        <option value="time" selected>发布时间</option>
+        <option value="likes">点赞数</option>
       </select>
     </div>
     <span id="recentSummary"></span>
@@ -146,7 +154,7 @@
     <thead>
       <tr>
         <th>作品</th>
-        <th class="recent-time-col">发布</th>
+        <th class="recent-time-col">发布时间</th>
         <th class="recent-num recent-24h-col" title="作品发布后约 24 小时时的点赞数；作品未满 24 小时或数据还没覆盖到 24 小时时显示占位文字">发布后24h赞</th>
         <th class="recent-num">当前赞</th>
         <th>发布后曲线</th>
@@ -163,8 +171,10 @@ let refreshTimer = null;
 let allData = [];
 let top10Data = {};  // {aweme_id: [{ts, digg_count, ...}, ...]} top10 / recent 共用
 let metaData = {};   // {aweme_id: {desc, create_time, share_url}} recent 用
-let recentListDays = 7;       // 最近作品列表窗口（天）
+let recentWindow = '7';       // '7' / '14' = 最近 N 天发布；'since' = 定档日（10/17）起全部
+const RECENT_SINCE_TS = new Date('2026-10-17T00:00:00+08:00').getTime() / 1000;  // 定档日 0 点（北京时间）
 let recentCurveHours = 72;    // sparkline 横轴：发布后 N 小时
+let recentSort = 'time';      // 最近作品排序：'time' = 发布时间，'likes' = 点赞数（均倒序）
 let currentFiltered = [];
 let currentRangeObj = null;
 
@@ -174,7 +184,7 @@ let currentRangeObj = null;
 //   yqmr → #昀牵孟绕；sgz → #尚公主；fyzs → #扶摇直尚
 //   mzylyr → #孟子义李昀锐；lyrmzy → #李昀锐孟子义
 //   mzy → #孟子义；lyr → #李昀锐；mwy → #暮晚摇；ys → #言尚
-// 后 4 个只有抖音数据，没有小红书话题数据（douyinOnly），xhs 视图会跳过
+// 9 个话题在 douyin.json / xhs_topic.json 中都有数据（xhs 字段为 {prefix}_tag_view_num）
 const SERIES_BASE = [
   { name: '#昀牵孟绕', prefix: 'yqmr',
     viewColor: '#7D4698', viewBarColor: '#B197C4',
@@ -191,22 +201,21 @@ const SERIES_BASE = [
   { name: '#李昀锐孟子义', prefix: 'lyrmzy',
     viewColor: '#EE2E84', viewBarColor: '#FECDD3',  // Tailwind rose-600 / rose-200（rose 比 pink 红更多/紫更少，更"粉"）
     userColor: '#DB2777', userBarColor: '#F472B6' }, // Tailwind pink-600 / pink-400
-  // 以下 4 个暂时只在抖音视图展示；小红书视图等数据稳定后再加
-  { name: '#孟子义', prefix: 'mzy', douyinOnly: true,
+  { name: '#孟子义', prefix: 'mzy',
     viewColor: '#EA580C', viewBarColor: '#FDBA74',
     userColor: '#C2410C', userBarColor: '#FB923C' },
-  { name: '#李昀锐', prefix: 'lyr', douyinOnly: true,
+  { name: '#李昀锐', prefix: 'lyr',
     viewColor: '#0891B2', viewBarColor: '#67E8F9',
     userColor: '#0E7490', userBarColor: '#22D3EE' },
-  { name: '#暮晚摇', prefix: 'mwy', douyinOnly: true,
+  { name: '#暮晚摇', prefix: 'mwy',
     viewColor: '#CA8A04', viewBarColor: '#FDE047',
     userColor: '#A16207', userBarColor: '#FACC15' },
-  { name: '#言尚', prefix: 'ys', douyinOnly: true,
+  { name: '#言尚', prefix: 'ys',
     viewColor: '#64748B', viewBarColor: '#CBD5E1',
     userColor: '#475569', userBarColor: '#94A3B8' },
 ];
 
-// 抖音话题图例的固定两行顺序（xhs 视图只有前 5 个话题，缺失项会自动过滤）
+// 抖音 / 小红书话题图例的固定两行顺序（缺失的系列会自动过滤）
 const TOPIC_LEGEND_ROWS = [
   ['#尚公主', '#扶摇直尚', '#暮晚摇', '#言尚'],
   ['#昀牵孟绕', '#孟子义李昀锐', '#李昀锐孟子义', '#孟子义', '#李昀锐'],
@@ -355,8 +364,9 @@ function getNameFor(awemeId) {
   return cleanDesc(meta.desc) || `作品 ${String(awemeId).slice(-6)}`;
 }
 function buildRecentItems() {
-  const now = Date.now() / 1000;
-  const cutoff = now - recentListDays * 86400;
+  const cutoff = recentWindow === 'since'
+    ? RECENT_SINCE_TS
+    : Date.now() / 1000 - Number(recentWindow) * 86400;
   return Object.keys(top10Data)
     .map(id => {
       const meta = metaData[id] || {};
@@ -369,7 +379,18 @@ function buildRecentItems() {
       };
     })
     .filter(it => it.publishTs >= cutoff && it.records.length > 0)
-    .sort((a, b) => b.publishTs - a.publishTs);
+    .map(it => ({ ...it, latestLikes: latestDiggCount(it.records) }))
+    .sort(recentSort === 'likes'
+      ? (a, b) => (b.latestLikes ?? -1) - (a.latestLikes ?? -1) || b.publishTs - a.publishTs
+      : (a, b) => b.publishTs - a.publishTs);
+}
+// 当前点赞数 = 最新一条快照的 digg_count
+function latestDiggCount(records) {
+  let latest = null;
+  for (const r of records) {
+    if (latest == null || r.ts > latest.ts) latest = r;
+  }
+  return latest ? latest.digg_count : null;
 }
 // 发布后 hours 小时的点赞数：取离目标时间最近的已到达快照；还没到就返回 null
 function valueAtAge(records, publishTs, hours) {
@@ -430,9 +451,12 @@ function renderRecentTable() {
   const summary = document.getElementById('recentSummary');
   if (!tbody) return;
   const items = buildRecentItems();
-  if (summary) summary.textContent = `共 ${items.length} 个作品 · 按发布时间倒序`;
+  if (summary) summary.textContent = `共 ${items.length} 个作品 · 按${recentSort === 'likes' ? '点赞数' : '发布时间'}倒序`;
   if (!items.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="recent-empty">最近 ${recentListDays} 天没有发布作品</td></tr>`;
+    const emptyMsg = recentWindow === 'since'
+      ? '定档日（10/17）以来没有发布作品'
+      : `最近 ${recentWindow} 天没有发布作品`;
+    tbody.innerHTML = `<tr><td colspan="5" class="recent-empty">${emptyMsg}</td></tr>`;
     return;
   }
   tbody.innerHTML = items.map(it => {
@@ -462,8 +486,8 @@ function renderRecentTable() {
 // 按当前指标算出 SERIES：view → view_count（原色），user → user_count（更鲜艳）；xhs → view_num（小红书字段无 douyin_ 中缀）
 function getSeries() {
   if (currentMetric === 'xhs') {
-    // 只有原先的 5 个话题有小红书数据；抖音单平台话题跳过
-    return SERIES_BASE.filter(s => !s.douyinOnly).map(s => ({
+    // xhs_topic.json 里 9 个话题都有 {prefix}_tag_view_num 字段
+    return SERIES_BASE.map(s => ({
       name: s.name,
       field: `${s.prefix}_tag_view_num`,
       color: s.viewColor,
@@ -484,10 +508,13 @@ function getSeries() {
 // ECharts 自带图例只能按宽度自动换行，无法指定“第一行这 4 个、第二行那 5 个”；
 // 这里隐藏 ECharts 图例，用 HTML 覆盖在折线图和柱状图之间，点击时仍然通过
 // dispatchAction 切换 ECharts 内部的 legend 状态。
+function usesTopicLegend() {
+  return currentMetric === 'view' || currentMetric === 'user' || currentMetric === 'xhs';
+}
 function renderTopicLegend(selectedMap = {}) {
   const el = document.getElementById('topicLegend');
   if (!el) return;
-  if (currentMetric !== 'view' && currentMetric !== 'user') {
+  if (!usesTopicLegend()) {
     el.style.display = 'none';
     return;
   }
@@ -511,7 +538,7 @@ function hideTopicLegend() {
   if (el) el.style.display = 'none';
 }
 function toggleTopicSeries(name) {
-  if (currentMetric !== 'view' && currentMetric !== 'user') return;
+  if (!usesTopicLegend()) return;
   subChart.dispatchAction({ type: 'legendToggleSelect', name });
 }
 
@@ -544,6 +571,7 @@ const recentControls = document.getElementById('recentControls');
 const recentTableWrap = document.getElementById('recentTableWrap');
 const recentDaysSelect = document.getElementById('recentDaysSelect');
 const recentCurveSelect = document.getElementById('recentCurveSelect');
+const recentSortSelect = document.getElementById('recentSortSelect');
 
 // ---- 时间范围解析 ----
 function parseRange(rangeValue) {
@@ -1265,8 +1293,8 @@ function renderChart(baseFiltered, range, selectedMap = {
       { text: getChartMeta().barTitle, left: 'center', top: 570 },
     ],
     legend: {
-      // view/user 用下方 #topicLegend 的 HTML 两行布局；xhs 仍用 ECharts 自带图例
-      show: currentMetric === 'xhs',
+      // view/user/xhs 用下方 #topicLegend 的 HTML 两行布局，这里只隐藏但保留内部状态
+      show: false,
       top: 435,
       left: 'center',
       data: getSeries().map(s => s.name),
@@ -1424,8 +1452,8 @@ function renderChart(baseFiltered, range, selectedMap = {
     ],
   }, true);
 
-  // view/user：显示固定两行的 HTML 图例；xhs：用 ECharts 自带图例
-  if (currentMetric === 'view' || currentMetric === 'user') {
+  // view/user/xhs：显示固定两行的 HTML 图例
+  if (usesTopicLegend()) {
     renderTopicLegend(selectedMap);
   } else {
     hideTopicLegend();
@@ -1620,11 +1648,18 @@ chartSelect.addEventListener('change', () => {
 });
 
 recentDaysSelect.addEventListener('change', () => {
-  recentListDays = parseInt(recentDaysSelect.value, 10) || 7;
+  recentWindow = recentDaysSelect.value === 'since'
+    ? 'since'
+    : String(parseInt(recentDaysSelect.value, 10) || 7);
   if (currentMetric === 'recent') renderRecentTable();
 });
 recentCurveSelect.addEventListener('change', () => {
   recentCurveHours = parseInt(recentCurveSelect.value, 10) || 72;
+  if (currentMetric === 'recent') renderRecentTable();
+});
+
+recentSortSelect.addEventListener('change', () => {
+  recentSort = recentSortSelect.value === 'likes' ? 'likes' : 'time';
   if (currentMetric === 'recent') renderRecentTable();
 });
 

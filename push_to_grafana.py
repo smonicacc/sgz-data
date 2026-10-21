@@ -81,10 +81,12 @@ DOUYIN_POSTS_HISTORY_STATS_FIELDS: tuple[str, ...] = (
 
 # xhs_topic.json record shape:
 #   {"ts": <int>,
-#    "sgz_tag_view_num": <int>,
-#    "yqmr_tag_view_num": <int>,
-#    "fyzs_tag_view_num": <int>}
-# All three topics share the same metric, distinguished by a `tag` label.
+#    "sgz_tag_view_num": <int>, "yqmr_tag_view_num": <int>,
+#    "fyzs_tag_view_num": <int>, "mzylyr_tag_view_num": <int>,
+#    "lyrmzy_tag_view_num": <int>, "mzy_tag_view_num": <int>,
+#    "lyr_tag_view_num": <int>, "mwy_tag_view_num": <int>,
+#    "ys_tag_view_num": <int>}
+# All nine topics share the same metric, distinguished by a `tag` label.
 XHS_TOPIC_SUFFIX_MAP: list[tuple[str, str, str]] = [
     ("_tag_view_num", "xhs_topic_view_count", "tag"),
 ]
