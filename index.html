@@ -102,10 +102,12 @@ let currentRange = '3d';
 let currentChartType = 'line';  // 'line' = 预约数折线图；'bar' = 预约数增量柱状图；'hot' = hot_num 折线图（红色系，仅最近 3 天）
 let refreshTimer = null;
 let allData = [];
+let hotData = [];  // [{ts, hot_num}] 来自 hot.json（热度专用归档）；data.json 里的 hot_num 作为回退
 let hotMaxData = null;  // {all_time_max_hot_num, all_time_max_ts, today_max_hot_num, today_max_ts, today_bj_date}；缺失时为 null
 let tableLimit = 50;
 let hotTableLimit = 100;  // 热度明细表默认显示 100 条，'+100' 翻页（与预约量表共用 #loadMoreWrap 按钮）
 let currentFiltered = [];
+let currentHotFiltered = [];
 let currentRangeObj = null;
 // 数据起始日（BJ）：早于这个 BJ 日的数据，折线图和表格都不显示
 // 设为 null 则不限制
@@ -751,16 +753,18 @@ function renderTable(filtered, range) {
 function applyRange() {
   currentRangeObj = parseRange(currentRange);
   const cutoffMs = bjDayStartFromStrMs(DAY_CUM_START_BJ);
-  currentFiltered = allData.filter(r => {
+  const inRange = r => {
     const tsMs = r.ts * 1000;
     return tsMs >= Math.max(currentRangeObj.min, cutoffMs) && tsMs <= currentRangeObj.max;
-  });
+  };
+  currentFiltered = allData.filter(inRange);
+  currentHotFiltered = hotData.filter(inRange);
   tableLimit = 50;        // 切换 range 时重置预约量表的分页
   hotTableLimit = 100;    // 切换 range 时重置热度表的分页
   if (currentChartType === 'hot') {
     // 热度模式：折线 + 下方明细表（柱状图 / 主表格已被 toggleChartDisplay 隐藏）
-    renderHotChart(currentFiltered, currentRangeObj);
-    renderHotTable(currentFiltered);
+    renderHotChart(currentHotFiltered, currentRangeObj);
+    renderHotTable(currentHotFiltered);
   } else {
     renderChart(currentFiltered, currentRangeObj);
     renderBarChart(currentFiltered, currentRangeObj);
@@ -789,6 +793,26 @@ function stopAutoRefresh() {
 async function loadData() {
   const res = await fetch('./data.json?t=' + Date.now());
   allData = await res.json();
+  // 热度有两个来源，按 ts 合并去重：
+  //   - hot.json：collect_hot_data.yaml → process.py 降采样（专用归档）
+  //   - data.json 里的 hot_num：collect_data.yaml 顺带采集（过渡期仍在跑）
+  // 同一 ts 两边都有时以 hot.json 为准；这样当前跑哪个 workflow 热度图都最新。
+  try {
+    const resHot = await fetch('./hot.json?t=' + Date.now());
+    hotData = resHot.ok ? await resHot.json() : [];
+  } catch (e) {
+    hotData = [];
+  }
+  const hotByTs = new Map();
+  for (const r of hotData) {
+    if (typeof r.hot_num === 'number') hotByTs.set(r.ts, { ts: r.ts, hot_num: r.hot_num });
+  }
+  for (const r of allData) {
+    if (typeof r.hot_num === 'number' && !hotByTs.has(r.ts)) {
+      hotByTs.set(r.ts, { ts: r.ts, hot_num: r.hot_num });
+    }
+  }
+  hotData = [...hotByTs.values()].sort((a, b) => a.ts - b.ts);
   // 热管理（all_time_max / today_max）— process.py 维护；缺失则保留 null（顶部 stat 不渲染）
   try {
     const res2 = await fetch('./data-hot-max.json?t=' + Date.now());
@@ -825,7 +849,7 @@ loadData().then(() => startAutoRefresh());
 document.getElementById('loadMoreBtn').addEventListener('click', () => {
   if (currentChartType === 'hot') {
     hotTableLimit += 100;
-    renderHotTable(currentFiltered);
+    renderHotTable(currentHotFiltered);
   } else {
     tableLimit += 50;
     renderTable(currentFiltered, currentRangeObj);
