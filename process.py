@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""分层归档时间序列：
-  - data-raw.json：append-only，全量保留，不降采样；可选带 hot_num
-  - data.json    ：
+"""分层归档时间序列（降采样规则对任意 record 通用）：
+  - <RAW_FILE>：append-only，全量保留，不降采样
+  - <JSON_FILE>：
       <24h         全保留
       24h~3d       按小时桶，桶末
       3d~7d        按 2 小时桶（双数小时），桶首
       >7d          按天桶，取 BJ 0:00 之后的第一条（前一天与当天分界）
 
   所有"天/小时"边界均按 UTC+8 计算（与 index.html 一致）
-  hot_num 若存在会随 record 一起落到 data-raw.json 和 data.json；
-  缺失时该字段整体不写（push_to_grafana.py 会按 record 字段是否存在自动映射）
 
-  另维护一个 data-hot-max.json（每次有 hot_num 时更新）：
+  两种用法（由环境变量区分）：
+    1) 预约数据（默认）：DATA_FILE=data.json, DATA_RAW_FILE=data-raw.json
+       record = {ts, value[, hot_num]}
+    2) 热度专用：DATA_FILE=hot.json, DATA_RAW_FILE=hot-raw.json
+       record = {ts, hot_num}（无 value，不再推 qq_video_subscribe）
+
+  另维护一个 HOT_MAX_FILE（每次 record 带 hot_num 时更新）：
     - all_time_max_hot_num / all_time_max_ts：历史上最大的 hot_num
     - today_max_hot_num / today_max_ts / today_bj_date：
         BJ 日期上"当天"最大的 hot_num；BJ 日期跨过 0 点自动重置
@@ -19,8 +23,10 @@
 
 运行时通过环境变量接收本次采集参数：
   RECORD_TS      - 本次记录时间戳（秒）
-  RECORD_VAL     - 本次记录数值
-  RECORD_HOT_NUM - 可选；非空整数时附加 hot_num（两文件均带）
+  RECORD_VAL     - 可选；本次预约数值（热度专用模式不传）
+  RECORD_HOT_NUM - 可选；非空整数时附加 hot_num
+  两者至少给一个
+  DATA_FILE / DATA_RAW_FILE / HOT_MAX_FILE - 可选，覆盖默认文件名
 """
 import json
 import os
@@ -65,18 +71,21 @@ RAW_FILE = os.environ.get("DATA_RAW_FILE", "data-raw.json")
 HOT_MAX_FILE = os.environ.get("HOT_MAX_FILE", "data-hot-max.json")
 now_ts = int(time.time())
 
-new_record = {
-    "ts": int(os.environ["RECORD_TS"]),
-    "value": int(os.environ["RECORD_VAL"]),
-}
+new_record = {"ts": int(os.environ["RECORD_TS"])}
 
-# Optional hot_num: only attached when RECORD_HOT_NUM is set to a non-empty
-# integer (collect_data.yaml emits empty string when COLLECT_HOT_NUM=false or
-# extraction failed). hot_num is carried into both data-raw.json and data.json
-# (the downsampled view keeps it so Grafana backfill picks it up).
+# value（预约数）与 hot_num 都是可选字段，两者至少给一个：
+#   - 预约流程：RECORD_VAL 必填，RECORD_HOT_NUM 可选
+#   - 热度专用流程：只传 RECORD_HOT_NUM，record 就是 {ts, hot_num}
+_val_env = os.environ.get("RECORD_VAL", "").strip()
+if _val_env:
+    new_record["value"] = int(_val_env)
+
 _hot_num_env = os.environ.get("RECORD_HOT_NUM", "").strip()
 if _hot_num_env:
     new_record["hot_num"] = int(_hot_num_env)
+
+if "value" not in new_record and "hot_num" not in new_record:
+    raise SystemExit("process.py: at least one of RECORD_VAL / RECORD_HOT_NUM is required")
 
 # 1) 全量存档：append-only，永不降采样
 if Path(RAW_FILE).exists():
@@ -174,7 +183,7 @@ for lst in day_groups.values():
     keep.append(bucket_pick(lst, 'first'))
 
 keep.sort(key=lambda x: x["ts"])
-# hot_num 跟 record 一起保留在 data.json，供 push_to_grafana.py 回填
-# qq_video_hot_num；index.html 只读 {ts, value}，不会把它当作 metric。
+# hot_num 跟 record 一起保留在降采样文件里，供 push_to_grafana.py 回填
+# qq_video_hot_num；index.html 的预约图只读 {ts, value}，不会把它当作 metric。
 with open(JSON_FILE, "w", encoding="utf-8") as f:
     json.dump(keep, f, ensure_ascii=False, indent=2)

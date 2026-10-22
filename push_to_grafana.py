@@ -5,7 +5,7 @@ Generic entry point supporting four subcommands, one per data domain:
 
   qq-video      data.json style {ts, value[, hot_num]}
                 value    → qq_video_subscribe
-                hot_num  → qq_video_hot_num (optional, only when COLLECT_HOT_NUM=true)
+                hot_num  → qq_video_hot_num (可单独推送，或用 --val 一起推)
   douyin-user   douyin.json style {ts, sgz_*, *_tag_*}
   douyin-posts  user_posts[.history].json
   xhs-topic     xhs_topic.json style {ts, *_tag_view_num}
@@ -377,14 +377,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="QQ 视频单点 → qq_video_subscribe（可选 --hot-num 顺带推 qq_video_hot_num）；"
              "或 data.json 全量回填（自动按字段映射 value / hot_num）",
     )
-    qq_mode = p_qq.add_mutually_exclusive_group(required=True)
+    qq_mode = p_qq.add_mutually_exclusive_group(required=False)
     qq_mode.add_argument("--val", type=int,
                          help="单点模式：直接推送一个整数（→ qq_video_subscribe）")
     qq_mode.add_argument("--records-file", type=str,
                          help="多点模式：读 JSON 数组，每条 {ts, value[, hot_num]} 自动按字段映射")
     p_qq.add_argument(
         "--hot-num", type=int, default=None,
-        help="（仅与 --val 同用）顺带推送 hot_num 单点 → qq_video_hot_num",
+        help="单点模式：推送 hot_num → qq_video_hot_num；"
+             "单独使用则只推 hot_num，与 --val 同用则两条都推",
     )
     _add_global_flags(p_qq)
 
@@ -430,17 +431,24 @@ def _build_parser() -> argparse.ArgumentParser:
 # ---- qq-video ------------------------------------------------------------- #
 
 def cmd_qq_video(args: argparse.Namespace) -> int:
-    if args.val is not None:
+    if args.records_file is not None and args.hot_num is not None:
+        print("qq-video: --hot-num only works in single-point mode (--val or standalone)",
+              file=sys.stderr)
+        return 2
+
+    # Single-point mode: --val and/or --hot-num. `--hot-num` alone keeps
+    # working when only the hot metric is collected.
+    if args.val is not None or args.hot_num is not None:
         ts_ms = int(time.time() * 1000)
-        metrics = [{
-            "name": "qq_video_subscribe",
-            "labels": dict(QQ_VIDEO_DEFAULT_LABELS),
-            "value": args.val,
-            "timestamp_ms": ts_ms,
-        }]
-        # Optional companion: --hot-num lets the workflow dispatcher push both
-        # metrics in a single invocation when COLLECT_HOT_NUM=true produced it.
-        if getattr(args, "hot_num", None) is not None:
+        metrics = []
+        if args.val is not None:
+            metrics.append({
+                "name": "qq_video_subscribe",
+                "labels": dict(QQ_VIDEO_DEFAULT_LABELS),
+                "value": args.val,
+                "timestamp_ms": ts_ms,
+            })
+        if args.hot_num is not None:
             metrics.append({
                 "name": "qq_video_hot_num",
                 "labels": dict(QQ_VIDEO_DEFAULT_LABELS),
@@ -448,6 +456,11 @@ def cmd_qq_video(args: argparse.Namespace) -> int:
                 "timestamp_ms": ts_ms,
             })
         return _emit_or_send(metrics, args.dry_run, args.print_only)
+
+    if args.records_file is None:
+        print("qq-video: one of --val / --hot-num / --records-file is required",
+              file=sys.stderr)
+        return 2
 
     # --records-file
     records = _load_json(args.records_file)
