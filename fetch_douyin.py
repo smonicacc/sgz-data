@@ -45,21 +45,13 @@ UA = os.environ.get(
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
 )
+# 可选：带上登录态 Cookie。CI 出口 IP 比家用 IP 更容易被风控，
+# 带上同域 Cookie 能明显降低拿到占位页/验证页的概率。
+COOKIE = os.environ.get("COOKIE", "").strip()
 TIMEOUT = int(os.environ.get("TIMEOUT", "30"))
 DEBUG = "DEBUG" in os.environ
 
 URL = f"https://www.douyin.com/hashtag/{HID}"
-
-# Primary: full RSC flight payload. The payload is embedded inside a JS
-# string literal so JSON quotes are escaped as `\"`. Anchor on the requested
-# `cid`, then capture chaName + viewCount + userCount.
-# Example: \"cid\":\"1785612028243012\",\"chaName\":\"...\",\"viewCount\":10154780119,\"userCount\":304945
-PAT_FLIGHT = re.compile(
-    r'\\"cid\\":\\"(\d+)\\"[,\\][^\\]*?'
-    r'\\"chaName\\":\\"([^"\\]+)\\"[,\\][^\\]*?'
-    r'\\"viewCount\\":(\d+)[,\\][^\\]*?'
-    r'\\"userCount\\":(\d+)'
-)
 
 # Fallback for viewCount only: rendered display text, e.g.
 #   >101.5亿<!-- -->次播放</span>
@@ -68,15 +60,57 @@ PAT_DISPLAY = re.compile(
 )
 
 
-def fetch(url: str, ua: str, timeout: int) -> bytes:
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": ua,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-        },
+def _field_int(window: str, quote: str, name: str):
+    m = re.search(re.escape(quote) + name + re.escape(quote) + r':\s*(\d+)', window)
+    return int(m.group(1)) if m else None
+
+
+def _field_str(window: str, quote: str, name: str):
+    pat = (
+        re.escape(quote) + name + re.escape(quote)
+        + r':\s*' + re.escape(quote) + r'([^"\\]*)' + re.escape(quote)
     )
+    m = re.search(pat, window)
+    return m.group(1) if m else None
+
+
+def parse_flight(text: str, hid: str):
+    """从 RSC flight payload 里取 chaName / viewCount / userCount。
+
+    Payload 嵌在 JS 字符串里，引号一般被转义成 `\\"`，偶发也会是普通 `"`，
+    两种都试。字段顺序可能变化，所以先定位 `cid` 为 HID 的对象窗口，再在
+    窗口内独立匹配字段，而不是用一条要求固定顺序的大正则。
+    """
+    for quote in ('\\"', '"'):
+        anchor = quote + "cid" + quote + ":" + quote + hid + quote
+        start = 0
+        while True:
+            idx = text.find(anchor, start)
+            if idx < 0:
+                break
+            start = idx + 1
+            # 窗口截止到下一个 cid 对象，避免误取相邻话题的字段
+            nxt = text.find(quote + "cid" + quote + ":", idx + len(anchor))
+            window = text[idx: nxt if nxt > idx else idx + 4000]
+            view_count = _field_int(window, quote, "viewCount")
+            user_count = _field_int(window, quote, "userCount")
+            if view_count is not None and user_count is not None:
+                return _field_str(window, quote, "chaName"), view_count, user_count
+    return None
+
+
+def fetch(url: str, ua: str, timeout: int) -> bytes:
+    headers = {
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Referer": "https://www.douyin.com/",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+    if COOKIE:
+        headers["Cookie"] = COOKIE
+    req = urllib.request.Request(url, headers=headers)
     if SSL_CTX is not None:
         return urllib.request.urlopen(req, timeout=timeout, context=SSL_CTX).read()
     return urllib.request.urlopen(req, timeout=timeout).read()
@@ -96,15 +130,9 @@ def main() -> int:
 
     text = body.decode("utf-8", errors="replace")
 
-    m = PAT_FLIGHT.search(text)
-    if m:
-        cid, cha_name, view_count, user_count = m.groups()
-        if cid != HID:
-            print(
-                f"CID_MISMATCH: payload cid={cid} != requested HID={HID}",
-                file=sys.stderr,
-            )
-            return 1
+    parsed = parse_flight(text, HID)
+    if parsed:
+        cha_name, view_count, user_count = parsed
         if TAG_NAME and cha_name != TAG_NAME:
             print(
                 f"TAG_NAME_MISMATCH: payload chaName={cha_name!r} != requested TAG_NAME={TAG_NAME!r}",
@@ -131,7 +159,11 @@ def main() -> int:
         print(json.dumps(out, ensure_ascii=False))
         return 0
 
-    print("NOT_FOUND", file=sys.stderr)
+    # CI 上偶发拿到风控/占位页；把页面大小和 title 带出来，方便判断是
+    # 网络/反爬（重试可能恢复）还是页面结构变化。
+    title_match = re.search(r"<title[^>]*>([^<]*)", text, re.IGNORECASE)
+    title = title_match.group(1).strip() if title_match else ""
+    print(f"NOT_FOUND: bytes={len(body)} title={title!r}", file=sys.stderr)
     return 1
 
 

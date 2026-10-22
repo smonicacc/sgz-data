@@ -28,6 +28,7 @@ macOS 自带 Python 常见 CERTIFICATE_VERIFY_FAILED，可加 `--insecure`
 import argparse
 import json
 import os
+import random
 import ssl
 import subprocess
 import sys
@@ -239,27 +240,45 @@ def fetch_profile(url: str, cookie: str, timeout: int) -> dict:
     return {"follower_count": int(follower), "total_favorited": int(favorited)}
 
 
-def fetch_hashtag(hid: str, tag_name: str, timeout: int, attempts: int = 3) -> dict:
+def fetch_hashtag(hid: str, tag_name: str, timeout: int, attempts: int = 4) -> dict:
     env = os.environ.copy()
     env.update({"HID": hid, "TAG_NAME": tag_name, "TIMEOUT": str(timeout)})
-    last = None
+    # CI 出口 IP 容易撞风控页；有 profile cookie 时交替带/不带重试，
+    # 避免"带 cookie 被拦"和"不带 cookie 被拦"两种情况同时卡死。
+    cookie = os.environ.get("DOUYIN_PROFILE_COOKIE", "").strip()
+    last_err = None
     for attempt in range(attempts):
-        proc = _run(
-            [sys.executable, "fetch_douyin.py"],
-            env=env,
-            capture_output=True,
-        )
-        lines = (proc.stdout or "").strip().splitlines()
-        if not lines:
-            raise RuntimeError("fetch_douyin.py 没有输出")
-        last = json.loads(lines[-1])
-        # 偶发反爬/SSR 半渲染会返回 0；话题数据不可能为 0，重试而不是写脏数据。
-        if int(last.get("viewCount") or 0) > 0 and last.get("userCount") is not None:
-            return last
+        if cookie and attempt % 2 == 0:
+            env["COOKIE"] = cookie
+        else:
+            env.pop("COOKIE", None)
+        try:
+            proc = _run(
+                [sys.executable, "fetch_douyin.py"],
+                env=env,
+                capture_output=True,
+            )
+            lines = (proc.stdout or "").strip().splitlines()
+            if not lines:
+                raise RuntimeError("fetch_douyin.py 没有输出")
+            data = json.loads(lines[-1])
+            # 偶发反爬/SSR 半渲染会返回 0；话题数据不可能为 0，重试而不是写脏数据。
+            if int(data.get("viewCount") or 0) > 0 and data.get("userCount") is not None:
+                return data
+            last_err = f"无效数据 {data}"
+        except (RuntimeError, json.JSONDecodeError) as e:
+            # NOT_FOUND / TLS / 超时等一律重试：CI 出口 IP 更容易撞上抖音风控页。
+            last_err = str(e)
+
         if attempt + 1 < attempts:
-            print(f"[douyin] {tag_name} 返回无效数据 {last}，重试...", file=sys.stderr)
-            time.sleep(2)
-    raise RuntimeError(f"{tag_name} 连续 {attempts} 次返回无效数据: {last}")
+            delay = min(2 ** attempt, 8) + random.uniform(0, 1)
+            print(
+                f"[douyin] {tag_name} 第 {attempt + 1}/{attempts} 次失败"
+                f"（{last_err}），{delay:.1f}s 后重试",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+    raise RuntimeError(f"{tag_name} 连续 {attempts} 次失败，最后一次：{last_err}")
 
 
 def archive_douyin(ts: int, profile: dict | None, tags: dict) -> dict:
@@ -306,7 +325,12 @@ def _run(cmd, env=None, capture_output=False):
     )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
-        raise RuntimeError(f"{' '.join(cmd[:2])} 失败（exit {proc.returncode}）: {detail[-800:]}")
+        # 只显示脚本名，避免 CI 日志里出现一长串 interpreter 绝对路径
+        script = next(
+            (Path(c).name for c in cmd[1:] if str(c).endswith(".py")),
+            Path(cmd[0]).name,
+        )
+        raise RuntimeError(f"{script} 失败（exit {proc.returncode}）: {detail[-800:]}")
     return proc
 
 
@@ -450,7 +474,10 @@ def main() -> int:
     tags = {}
     if not args.skip_douyin:
         try:
-            for hid, name, alias in HASHTAGS:
+            for idx, (hid, name, alias) in enumerate(HASHTAGS):
+                if idx:
+                    # 连续 9 个请求容易被风控，插入 0.6~1.4s 随机间隔
+                    time.sleep(random.uniform(0.6, 1.4))
                 fetched = fetch_hashtag(hid, name, args.timeout)
                 tags[alias] = fetched
                 print(
