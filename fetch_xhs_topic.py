@@ -34,6 +34,8 @@ Env:
                      (default: new_xhs_topic_record.json)
   XHS_SSL_VERIFY   - "0" disables TLS verification (macOS Python cert workaround).
                      Default: "1".
+  XHS_DRY_RUN      - "1" fetches + prints the record but skips all writes
+                     (used by collect_once.py --dry-run). Default: "0".
   UA               - optional user-agent override.
   TIMEOUT          - seconds (default 30).
 """
@@ -223,6 +225,8 @@ def _emit_record(
     / standalone input for `python3 downsample_xhs_topic.py`), then append it to
     the raw archive and rebuild the downsampled view from that archive.
     """
+    if os.environ.get("XHS_DRY_RUN", "0") == "1":
+        return
     new_record_file.write_text(
         json.dumps(record, ensure_ascii=False),
         encoding="utf-8",

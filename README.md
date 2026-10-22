@@ -27,6 +27,7 @@
 
 | 脚本 | 用途 |
 |------|------|
+| [`collect_once.py`](collect_once.py) | **一次跑完全部采集**：腾讯视频 `hot_num`/`attent_num` + 抖音号粉丝/获赞 + 9 个抖音话题播放/参与 + 9 个小红书话题浏览；逻辑与 `collect_hot_data.yaml` 对齐。支持 `--dry-run` / `--skip-qq` / `--skip-douyin` / `--skip-xhs` / `--insecure` |
 | [`fetch_douyin.py`](fetch_douyin.py) | 抓取一个抖音话题的 `viewCount` / `userCount`（CLI 接收 `HID` + `TAG_NAME` 环境变量） |
 | [`fetch_user_posts.py`](fetch_user_posts.py) | 抓取抖音创作者最近帖子快照 + 写入 history |
 | [`fetch_xhs_topic.py`](fetch_xhs_topic.py) | 抓取小红书 9 个话题 `view_num`（TOPICS 列表写死在脚本里，详见 [xiaohongshu.md](xiaohongshu.md)） |
@@ -105,13 +106,28 @@ PY
 
 ## 3. GitHub Actions 调度
 
-只有一个工作流：`.github/workflows/collect_data.yaml`（`workflow_dispatch` 触发）。
+三个 `workflow_dispatch` 工作流：
 
-> 该工作流没有顶层 `schedule:` 触发器，靠外部（如 GitHub UI 手动 / webhook / 第三方 cron）按需 dispatch。每次运行内部自判断"是否 due"，到点了才真正发请求。
+| 工作流 | 采集内容 |
+|--------|----------|
+| `.github/workflows/collect_once.yaml` | 直接运行 [`collect_once.py`](collect_once.py)：默认只把结果打印到 Actions 日志；`WRITE=true` 才写入并提交 JSON |
+| `.github/workflows/collect_hot_data.yaml` | 腾讯视频 `hot_num` → `hot.json` / `data-hot-max.json`；抖音号粉丝/获赞 + 9 个抖音话题 + 9 个小红书话题 → `douyin.json` / `xhs_topic.json` |
+| `.github/workflows/collect_data.yaml` | 腾讯视频 `attent_num`（可选 `hot_num`）→ `data.json`；同样带抖音 / 小红书采集 |
 
-手动触发参数：
+> 三个工作流都没有顶层 `schedule:` 触发器，靠外部（如 GitHub UI 手动 / webhook / 第三方 cron）按需 dispatch。
+> `collect_once.yaml` 每次都会完整采集（不判断 due）；另外两个内部自判断"是否 due"，要强制一次全量采集时把 `FORCE` 设为 `true`。
 
-手动触发参数：
+`collect_once.yaml` 手动触发参数：
+
+| 输入 | 默认 | 说明 |
+|------|------|------|
+| `WRITE` | `false` | `false` = 只把汇总打印到 Actions 日志；`true` = 写入 JSON 并提交 |
+| `SKIP_XHS` | `false` | 跳过小红书 |
+| `SKIP_DOUYIN` | `false` | 跳过抖音（含抖音号 profile） |
+
+所需 Secrets 与本地 `.env` 相同：`DOUYIN_PROFILE_URL`、`DOUYIN_PROFILE_COOKIE`、`XHS_COOKIE`（缺失时对应部分自动跳过）。
+
+`collect_hot_data.yaml` 手动触发参数（`collect_data.yaml` 另有 `COLLECT_HOT_NUM`）：
 
 | 输入 | 默认 | 说明 |
 |------|------|------|
@@ -185,9 +201,52 @@ metric 前缀遵循 `平台域_实体_属性` 的小写下划线风格；`douyin
 | `DOUYIN_PROFILE_COOKIE` | 抖音创作者 profile 完整 Cookie |
 | `XHS_COOKIE` | 小红书创作者端完整 Cookie（`a1 / webId / webBuild / web_session / ...`，详见 [xiaohongshu.md §1](xiaohongshu.md#1-需要手动获取的信息)） |
 
+### 5.1 获取 `DOUYIN_PROFILE_URL` / `DOUYIN_PROFILE_COOKIE`
+
+这两个值来自**登录态浏览器**里抖音号主页的 profile 请求，必须成对使用（URL 里的签名和 Cookie 属于同一会话）。
+
+1. 登录 douyin.com，打开「尚公主」抖音号主页，地址形如
+   `https://www.douyin.com/user/MS4wLjABAAAA...`，`MS4w...` 就是 `sec_user_id`。
+2. F12 → Network → 过滤 `user/profile/other` → 刷新页面。
+3. 点开该请求，确认 Response 里有 `"user": {"follower_count": ..., "total_favorited": ...}`。
+4. 右键请求 → Copy → **Copy as cURL (bash)**。
+5. 从 cURL 里取两段：
+   - `DOUYIN_PROFILE_URL`：`curl '...'` 里的完整 URL（保留全部 query，尤其 `sec_user_id`、`a_bogus`、`msToken`）。
+   - `DOUYIN_PROFILE_COOKIE`：`-H 'cookie: ...'` 或 `-b '...'` 后的完整 Cookie 字符串。
+   也可以在请求的 Headers 面板直接复制 `cookie` 请求头。
+
+> `a_bogus` / `msToken` 是带时效的签名：采集开始返回空 `user` 或 403 时，按上面步骤重新 Copy 一次 URL。Cookie 过期同理。不要提交到仓库，只放 `.env` 或 GitHub Secrets。
+>
+> 快速验证：
+> ```bash
+> curl -sS "$DOUYIN_PROFILE_URL" -b "$DOUYIN_PROFILE_COOKIE" \
+>   -H 'accept: application/json, text/plain, */*' \
+>   -H 'referer: https://www.douyin.com/' | \
+>   python3 -c "import json,sys; u=json.load(sys.stdin)['user']; print(u['follower_count'], u['total_favorited'])"
+> ```
+
 ---
 
 ## 6. 本地开发
+
+### 6.1 一次采集全部数据
+
+把凭据写进仓库根目录的 `.env`（已在 `.gitignore`，可参考 [`.env.example`](.env.example)），然后：
+
+```bash
+# 默认：只抓取并打印，不写任何文件
+python3 collect_once.py --insecure
+
+# 需要把本次结果归档进各类 JSON 时加 --write
+python3 collect_once.py --write --insecure
+
+# 凭据不全时按需跳过
+python3 collect_once.py --skip-xhs --skip-profile --insecure
+```
+
+输出末尾会汇总本次采集的：抖音话题播放数/参与人数、小红书话题浏览数、尚公主抖音号粉丝/获赞、腾讯视频 `hot_num` 的当日最高值。`--insecure` 仅用于本机 Python 证书链报 `CERTIFICATE_VERIFY_FAILED` 的情况。
+
+### 6.2 其他命令
 
 ```bash
 # qq-video 一次性单点推送

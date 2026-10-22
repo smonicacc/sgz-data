@@ -59,3 +59,7 @@ responses/
 # in user_posts_history.json (tracked). The snapshot is regenerated each
 # run and pushed to Grafana, but not committed.
 data/user_posts.json
+
+# 本地/CI 每次采集生成的单条 record 调试文件。
+new_douyin_record.json
+new_xhs_topic_record.json

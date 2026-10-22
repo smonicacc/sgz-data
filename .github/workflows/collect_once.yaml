@@ -1,0 +1,97 @@
+name: Collect once (print or write)
+
+on:
+  workflow_dispatch:
+    inputs:
+      WRITE:
+        description: 是否把采集结果写入 JSON 并提交（默认只打印到日志）
+        type: choice
+        required: true
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
+      SKIP_XHS:
+        description: 跳过小红书
+        type: choice
+        required: true
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
+      SKIP_DOUYIN:
+        description: 跳过抖音（含抖音号 profile）
+        type: choice
+        required: true
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect-once
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: python3 -m pip install --quiet "xhshow>=0.1.9"
+
+      - name: Run collect_once.py
+        env:
+          WRITE_INPUT: ${{ github.event.inputs.WRITE }}
+          SKIP_XHS_INPUT: ${{ github.event.inputs.SKIP_XHS }}
+          SKIP_DOUYIN_INPUT: ${{ github.event.inputs.SKIP_DOUYIN }}
+          DOUYIN_PROFILE_URL: ${{ secrets.DOUYIN_PROFILE_URL }}
+          DOUYIN_PROFILE_COOKIE: ${{ secrets.DOUYIN_PROFILE_COOKIE }}
+          XHS_COOKIE: ${{ secrets.XHS_COOKIE }}
+        run: |
+          ARGS=()
+          if [[ "$WRITE_INPUT" == "true" ]]; then
+            ARGS+=(--write)
+          fi
+          if [[ "$SKIP_XHS_INPUT" == "true" ]]; then
+            ARGS+=(--skip-xhs)
+          fi
+          if [[ "$SKIP_DOUYIN_INPUT" == "true" ]]; then
+            ARGS+=(--skip-douyin)
+          fi
+          echo "python3 collect_once.py ${ARGS[*]}"
+          python3 collect_once.py "${ARGS[@]}" | tee /tmp/collect_once.out
+
+      - name: Publish summary
+        if: always()
+        run: |
+          if [[ -s /tmp/collect_once.out ]]; then
+            { echo '```'; cat /tmp/collect_once.out; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit and push updated data
+        if: ${{ github.event.inputs.WRITE == 'true' }}
+        run: |
+          git config --global user.name "AutoCollector"
+          git config --global user.email "auto@collector.local"
+          git add data.json data-raw.json hot.json hot-raw.json data-hot-max.json \
+                  douyin.json douyin-raw.json xhs_topic.json xhs_topic-raw.json
+          if git diff --quiet --cached; then
+            echo "No changes, skip commit"
+          else
+            git commit -m "collect once $(date -u)"
+            git push
+          fi
