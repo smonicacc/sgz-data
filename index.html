@@ -61,22 +61,15 @@
     <div class="toolbar-group">
       <label for="chartSelect">图表：</label>
       <select id="chartSelect">
-        <option value="line" selected>预约数</option>
-        <option value="bar">预约增量</option>
-        <option value="hot">热度</option>
+        <option value="hot" selected>热度</option>
       </select>
     </div>
     <div class="toolbar-group">
       <label for="rangeSelect">时间范围：</label>
       <select id="rangeSelect">
-        <option value="1d">最近24小时</option>
-        <option value="3d" selected>最近3天</option>
-        <option value="7d">最近7天</option>
-        <option value="14d">最近14天</option>
-        <!-- 月份选项保留在 JS 中（parseRange/downsampleForChart/bucketize 等逻辑未删），需要时取消注释即可恢复 -->
-        <option value="month:9">9月</option>
-        <option value="month:10">10月</option>
-        <option value="all">全部</option>
+        <option value="1d" selected>最近24小时</option>
+        <option value="3d">最近3天</option>
+        <!-- 其余时间范围选项仍保留在 JS 的 RANGE_OPTIONS_DEFAULT 中，切回预约数图表时可恢复 -->
       </select>
       <span id="refreshStatus"></span>
     </div>
@@ -98,8 +91,8 @@
 </div>
 <script>
 // ---- 状态 ----
-let currentRange = '3d';
-let currentChartType = 'line';  // 'line' = 预约数折线图；'bar' = 预约数增量柱状图；'hot' = hot_num 折线图（红色系，仅最近 3 天）
+let currentRange = '1d';
+let currentChartType = 'hot';  // 'hot' = hot_num 折线图（红色系，仅最近 3 天）；'line'/'bar' 的渲染逻辑保留但不再提供入口
 let refreshTimer = null;
 let allData = [];
 let hotData = [];  // [{ts, hot_num}] 来自 hot.json（热度专用归档）；data.json 里的 hot_num 作为回退
@@ -844,6 +837,8 @@ chartSelect.addEventListener('change', () => {
   else stopAutoRefresh();
   applyRange();
 });
+// 初始即按当前图表类型切换显隐（默认热度：显示热度图/明细表/stat，隐藏预约数主表）
+toggleChartDisplay();
 loadData().then(() => startAutoRefresh());
 
 document.getElementById('loadMoreBtn').addEventListener('click', () => {
