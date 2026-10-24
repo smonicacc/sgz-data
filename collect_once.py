@@ -1,29 +1,28 @@
 #!/usr/bin/env python3
-"""一次跑完全部采集（等价于 .github/workflows/collect_hot_data.yaml 的流水线）。
+"""一次跑完抖音 + 小红书的采集。
 
 默认只抓取并打印，**不写任何 JSON 文件**；加 `--write` 才会归档落盘。
 
 采集内容：
-  1. 腾讯视频热度：hot_num + attent_num → data.json/data-raw.json、
-     hot.json/hot-raw.json，并更新 data-hot-max.json（当日 / 历史最高）
-  2. 抖音创作者 profile：尚公主抖音号粉丝数、获赞总数
-  3. 抖音话题：9 个话题的播放数（viewCount）/ 参与人数（userCount）
-  4. 小红书话题：9 个话题的浏览数（view_num）
+  1. 抖音创作者 profile：尚公主抖音号粉丝数、获赞总数
+  2. 抖音话题：9 个话题的播放数（viewCount）/ 参与人数（userCount）
+  3. 小红书话题：9 个话题的浏览数（view_num）
+
+腾讯视频数据（attent_num / hot_num）不在这里采集；fetch_qq() 保留下来
+给 watch_hot_num.py 复用。
 
 凭据从环境变量或 `.env` 读取（`.env` 已在 .gitignore 中）：
   DOUYIN_PROFILE_URL / DOUYIN_PROFILE_COOKIE  - 抖音号粉丝 / 点赞
   XHS_COOKIE                                  - 小红书话题
-  QQ_VID / QQ_CID                             - 腾讯视频（有默认值）
 
 macOS 自带 Python 常见 CERTIFICATE_VERIFY_FAILED，可加 `--insecure`
-（等价于 DY_SSL_VERIFY=0 / XHS_SSL_VERIFY=0 / QQ_SSL_VERIFY=0）。
+（等价于 DY_SSL_VERIFY=0 / XHS_SSL_VERIFY=0）。
 
 用法：
   python3 collect_once.py                 # 只抓取 + 打印，不写任何文件（默认）
   python3 collect_once.py --write         # 额外把结果归档进各类 JSON
   python3 collect_once.py --skip-xhs      # 跳过小红书
   python3 collect_once.py --skip-douyin   # 跳过抖音（含 profile）
-  python3 collect_once.py --skip-qq       # 跳过腾讯视频
 """
 import argparse
 import json
@@ -117,7 +116,7 @@ def _http_json(url: str, headers: dict, timeout: int, ctx) -> dict:
 
 
 # --------------------------------------------------------------------------
-# 腾讯视频：attent_num + hot_num
+# 腾讯视频：attent_num + hot_num（仅保留给 watch_hot_num.py 复用）
 # --------------------------------------------------------------------------
 def fetch_qq(vid: str, cid: str, timeout: int) -> dict:
     body = {
@@ -185,31 +184,6 @@ def fetch_qq(vid: str, cid: str, timeout: int) -> dict:
     if attent_num is None and hot_num is None:
         raise RuntimeError(f"响应里没有 attent_num / hot_num（cards={len(cards)}）")
     return {"attent_num": attent_num, "hot_num": hot_num}
-
-
-def archive_qq(ts: int, qq: dict) -> None:
-    """复用 process.py 的分层归档：data 系列 + hot 系列都写，并更新热管理文件。"""
-    if qq.get("attent_num") is None and qq.get("hot_num") is None:
-        return
-    base = {
-        "RECORD_TS": str(ts),
-        "RECORD_VAL": "" if qq.get("attent_num") is None else str(qq["attent_num"]),
-        "RECORD_HOT_NUM": "" if qq.get("hot_num") is None else str(qq["hot_num"]),
-    }
-    targets = []
-    if qq.get("attent_num") is not None:
-        targets.append(("data.json", "data-raw.json", True))
-    if qq.get("hot_num") is not None:
-        # hot.json 的 record 约定是 {ts, hot_num}，不带 value（见 process.py 注释）
-        targets.append(("hot.json", "hot-raw.json", False))
-    for data_file, raw_file, include_val in targets:
-        env = os.environ.copy()
-        env.update(base)
-        if not include_val:
-            env["RECORD_VAL"] = ""
-        env["DATA_FILE"] = data_file
-        env["DATA_RAW_FILE"] = raw_file
-        _run([sys.executable, "process.py"], env=env)
 
 
 # --------------------------------------------------------------------------
@@ -346,30 +320,7 @@ def _fmt_num(value) -> str:
     return f"{int(value):,}"
 
 
-def read_today_max(dry_run_hot: int | None) -> dict:
-    path = ROOT / "data-hot-max.json"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    today_bj = time.strftime("%Y-%m-%d", time.gmtime(time.time() + BJ_OFFSET))
-    if data.get("today_bj_date") != today_bj:
-        # 跨过 BJ 0 点或首次采集：当日值以本次采集为准
-        if dry_run_hot is not None:
-            data = {
-                "today_max_hot_num": dry_run_hot,
-                "today_max_ts": int(time.time()),
-                "today_bj_date": today_bj,
-            }
-    elif dry_run_hot is not None and dry_run_hot > data.get("today_max_hot_num", -1):
-        data = dict(data)
-        data["today_max_hot_num"] = dry_run_hot
-        data["today_max_ts"] = int(time.time())
-        data["today_bj_date"] = today_bj
-    return data
-
-
-def print_summary(ts, qq, profile, tags, xhs, persist) -> None:
+def print_summary(ts, profile, tags, xhs, persist) -> None:
     print()
     print("=" * 72)
     print(f"采集时间：{_bj_time(ts)}（北京时间）")
@@ -386,7 +337,7 @@ def print_summary(ts, qq, profile, tags, xhs, persist) -> None:
             f"    参与 {_fmt_num(fetched.get('userCount'))}"
         )
 
-    print("\n小红书话题浏览数")
+    print("\n小红书话题（浏览数）")
     for alias, name in WANTED:
         key = f"{alias}_tag_view_num"
         print(f"  {name:<6}  {_fmt_num((xhs or {}).get(key))}")
@@ -398,10 +349,6 @@ def print_summary(ts, qq, profile, tags, xhs, persist) -> None:
     else:
         print("  粉丝数 / 获赞总数  （未采集：缺少 DOUYIN_PROFILE_URL / DOUYIN_PROFILE_COOKIE）")
 
-    hot_max = read_today_max(qq.get("hot_num") if qq else None)
-    print("\n腾讯视频热度")
-    print(f"  当日最高热度    {_fmt_num(hot_max.get('today_max_hot_num'))}"
-          f"  （{_bj_time(hot_max.get('today_max_ts'))}）")
     if not persist:
         print("\n[只打印] 未写入任何数据文件。")
 
@@ -419,7 +366,6 @@ def main() -> int:
         action="store_true",
         help="兼容旧参数：只打印、不写文件（现在也是默认行为）",
     )
-    parser.add_argument("--skip-qq", action="store_true", help="跳过腾讯视频")
     parser.add_argument("--skip-douyin", action="store_true", help="跳过抖音（含 profile）")
     parser.add_argument("--skip-profile", action="store_true", help="跳过抖音号粉丝 / 点赞")
     parser.add_argument("--skip-xhs", action="store_true", help="跳过小红书")
@@ -431,25 +377,11 @@ def main() -> int:
     if args.insecure:
         os.environ["DY_SSL_VERIFY"] = "0"
         os.environ["XHS_SSL_VERIFY"] = "0"
-        os.environ["QQ_SSL_VERIFY"] = "0"
 
     # 默认只打印，不碰任何 JSON；--write 才归档。
     persist = args.write and not args.dry_run
     ts = int(time.time())
     errors = []
-
-    qq = None
-    if not args.skip_qq:
-        try:
-            qq = fetch_qq(
-                os.environ.get("QQ_VID", DEFAULT_VID),
-                os.environ.get("QQ_CID", DEFAULT_CID),
-                args.timeout,
-            )
-            print("[qq] ok")
-        except (urllib.error.URLError, TimeoutError, RuntimeError, ValueError) as e:
-            errors.append(f"腾讯视频: {e}")
-            print(f"[qq] 失败: {e}", file=sys.stderr)
 
     profile = None
     if not args.skip_douyin and not args.skip_profile:
@@ -503,12 +435,6 @@ def main() -> int:
                 print(f"[xhs] 失败: {e}", file=sys.stderr)
 
     if persist:
-        if qq:
-            try:
-                archive_qq(ts, qq)
-            except RuntimeError as e:
-                errors.append(f"腾讯视频归档: {e}")
-                print(f"[qq] 归档失败: {e}", file=sys.stderr)
         if tags:
             try:
                 archive_douyin(ts, profile, tags)
@@ -518,7 +444,7 @@ def main() -> int:
     else:
         print("[只打印] 跳过归档（process.py / downsample_douyin.py）", file=sys.stderr)
 
-    print_summary(ts, qq, profile, tags, xhs, persist)
+    print_summary(ts, profile, tags, xhs, persist)
 
     if errors:
         print("\n失败项：", file=sys.stderr)

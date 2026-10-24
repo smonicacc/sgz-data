@@ -27,7 +27,7 @@
 
 | 脚本 | 用途 |
 |------|------|
-| [`collect_once.py`](collect_once.py) | **一次跑完全部采集**：腾讯视频 `hot_num`/`attent_num` + 抖音号粉丝/获赞 + 9 个抖音话题播放/参与 + 9 个小红书话题浏览；逻辑与 `collect_hot_data.yaml` 对齐。支持 `--dry-run` / `--skip-qq` / `--skip-douyin` / `--skip-xhs` / `--insecure` |
+| [`collect_once.py`](collect_once.py) | **一次跑完抖音 + 小红书采集**：抖音号粉丝/获赞 + 9 个抖音话题播放/参与 + 9 个小红书话题浏览（腾讯视频数据不在这里采集；`fetch_qq()` 仅保留给 `watch_hot_num.py` 复用）。支持 `--dry-run` / `--skip-douyin` / `--skip-xhs` / `--insecure` |
 | [`fetch_douyin.py`](fetch_douyin.py) | 抓取一个抖音话题的 `viewCount` / `userCount`（CLI 接收 `HID` + `TAG_NAME` 环境变量） |
 | [`fetch_user_posts.py`](fetch_user_posts.py) | 抓取抖音创作者最近帖子快照 + 写入 history |
 | [`fetch_xhs_topic.py`](fetch_xhs_topic.py) | 抓取小红书 9 个话题 `view_num`（TOPICS 列表写死在脚本里，详见 [xiaohongshu.md](xiaohongshu.md)） |

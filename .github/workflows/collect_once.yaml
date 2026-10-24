@@ -87,8 +87,8 @@ jobs:
         run: |
           git config --global user.name "AutoCollector"
           git config --global user.email "auto@collector.local"
-          git add data.json data-raw.json hot.json hot-raw.json data-hot-max.json \
-                  douyin.json douyin-raw.json xhs_topic.json xhs_topic-raw.json
+          # collect_once.py 只写抖音 / 小红书四件套（腾讯相关的 data/hot 文件不再由它更新）
+          git add douyin.json douyin-raw.json xhs_topic.json xhs_topic-raw.json
           if git diff --quiet --cached; then
             echo "No changes, skip commit"
           else
