@@ -268,3 +268,8 @@ XHS_COOKIE="..." XHS_SSL_VERIFY=0 python3 fetch_xhs_topic.py
 ## 7. 相关文档
 
 - [xiaohongshu.md](xiaohongshu.md) — 小红书抓取流程、Cookie 获取、本地调试、字段映射、Grafana 推送细节
+
+
+问题：
+重启mDNSResponder:
+python3 -c "import socket; print(socket.getaddrinfo('pbaccess.video.qq.com',443)[0][4])"
