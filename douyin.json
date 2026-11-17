@@ -1489,29 +1489,6 @@
     "ys_douyin_tag_user_count": 47614
   },
   {
-    "ts": 1794650466,
-    "sgz_follower_count": 944395,
-    "sgz_total_favorited": 39881303,
-    "yqmr_douyin_tag_view_count": 10945307413,
-    "yqmr_douyin_tag_user_count": 348753,
-    "sgz_douyin_tag_view_count": 6144395710,
-    "sgz_douyin_tag_user_count": 220897,
-    "fyzs_douyin_tag_view_count": 403381918,
-    "fyzs_douyin_tag_user_count": 15796,
-    "mzylyr_douyin_tag_view_count": 5388148903,
-    "mzylyr_douyin_tag_user_count": 125104,
-    "lyrmzy_douyin_tag_view_count": 2481003691,
-    "lyrmzy_douyin_tag_user_count": 66407,
-    "mzy_douyin_tag_view_count": 61875133192,
-    "mzy_douyin_tag_user_count": 990753,
-    "lyr_douyin_tag_view_count": 41162694860,
-    "lyr_douyin_tag_user_count": 1103315,
-    "mwy_douyin_tag_view_count": 2091268911,
-    "mwy_douyin_tag_user_count": 58199,
-    "ys_douyin_tag_view_count": 1580441792,
-    "ys_douyin_tag_user_count": 47648
-  },
-  {
     "ts": 1794654065,
     "sgz_follower_count": 944303,
     "sgz_total_favorited": 39893703,
@@ -3189,5 +3166,28 @@
     "mwy_douyin_tag_user_count": 58598,
     "ys_douyin_tag_view_count": 1601380569,
     "ys_douyin_tag_user_count": 48657
+  },
+  {
+    "ts": 1794913265,
+    "sgz_follower_count": 940151,
+    "sgz_total_favorited": 40559285,
+    "yqmr_douyin_tag_view_count": 10988049394,
+    "yqmr_douyin_tag_user_count": 352332,
+    "sgz_douyin_tag_view_count": 6262258325,
+    "sgz_douyin_tag_user_count": 225083,
+    "fyzs_douyin_tag_view_count": 408475194,
+    "fyzs_douyin_tag_user_count": 16225,
+    "mzylyr_douyin_tag_view_count": 5414931026,
+    "mzylyr_douyin_tag_user_count": 126245,
+    "lyrmzy_douyin_tag_view_count": 2495068021,
+    "lyrmzy_douyin_tag_user_count": 67028,
+    "mzy_douyin_tag_view_count": 61993547584,
+    "mzy_douyin_tag_user_count": 992730,
+    "lyr_douyin_tag_view_count": 41231557819,
+    "lyr_douyin_tag_user_count": 1104820,
+    "mwy_douyin_tag_view_count": 2119194041,
+    "mwy_douyin_tag_user_count": 58626,
+    "ys_douyin_tag_view_count": 1601614926,
+    "ys_douyin_tag_user_count": 48679
   }
 ]
